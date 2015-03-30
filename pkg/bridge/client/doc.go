@@ -14,16 +14,16 @@ limitations under the License.
 package client
 
 import (
-	"time"
-	"io"
 	"errors"
+	"io"
+	"time"
 )
 
 const (
 	DEFAULT_BRIDGE_ENDPOINT   = "http://127.0.0.1:8989/"
 	DEFAULT_BINDING_PORT      = "8787"
 	DEFAULT_BINDING_INTERFACE = "0.0.0.0"
-	DEFAULT_BINDING           = DEFAULT_BINDING_INTERFACE+":"+DEFAULT_BINDING_PORT
+	DEFAULT_BINDING           = DEFAULT_BINDING_INTERFACE + ":" + DEFAULT_BINDING_PORT
 )
 
 var (
@@ -82,14 +82,7 @@ type Subscription struct {
 	Requests []*APIHook `json:"hooks"`
 }
 
-// Filters are used and applied against image, environment variables, hostnames, etc etc
-// I.e. you can say, send me all requests from /container/*/(create|start) from hostname =~ docker101
-// where it containers a environment variable of X
-type Filter map[string]interface {}
-
-//
 // A Hook definition / request for access to the API
-//
 type APIHook struct {
 	// should this hook be enforcing, i.e. if were not able to contact you, kill the request
 	Enforcing bool `json:"enforcing"`
@@ -97,8 +90,18 @@ type APIHook struct {
 	HookType string `json:"type"`
 	// the entrypoint for the request, a regex applied to URI
 	URI string `json:"uri"`
-	// a map of filters to be applied
-	Filters Filter `json:"filters,omitempty"`
 }
 
+// Response to the requests
 
+type MessageResponse struct {
+	Message string `json:"message"`
+}
+
+type SubscriptionResponse struct {
+	ID string `json:"id"`
+}
+
+type SubscriptionsResponse struct {
+	Subscriptions []*Subscription `json:"subscriptions"`
+}

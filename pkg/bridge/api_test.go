@@ -11,16 +11,19 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package main
+package bridge
 
 import (
+	"encoding/json"
+	"fmt"
+	"io/ioutil"
 	"net/http"
+	"strings"
 	"testing"
 
-	"fmt"
-	"github.com/stretchr/testify/assert"
+	"github.com/gambol99/bridge.io/pkg/bridge/client"
 
-	"io/ioutil"
+	"github.com/stretchr/testify/assert"
 )
 
 const (
@@ -35,6 +38,22 @@ func testAPIPath(uri string) string {
 	return fmt.Sprintf("http://%s/%s/%s", API_BINDING, API_VERSION, uri)
 }
 
+func getJSON(url string, result interface {}, t *testing.T) {
+  	response, err := http.Get(url)
+	if err != nil {
+		t.Fatal("Failed to perform the http get: %s, error: %s", url, err)
+	}
+	content, err := ioutil.ReadAll(response.Body)
+	if err != nil {
+		t.Fatal("Failed to read the request body, error: %s", err)
+	}
+
+	err = json.NewDecoder(strings.NewReader(string(content))).Decode(result)
+	if err != nil {
+		t.Fatal("Failed to decode the response, error: %s", err)
+	}
+}
+
 func TestNewAPI(t *testing.T) {
 	config := DefaultConfig()
 	config.ApiBinding = "127.0.0.1:3001"
@@ -43,14 +62,11 @@ func TestNewAPI(t *testing.T) {
 }
 
 func TestAPIPing(t *testing.T) {
-	response, err := http.Get(testAPIPath("ping"))
-	assert.Nil(t, err)
-	assert.NotNil(t, response)
-	assert.Equal(t, 200, response.StatusCode)
-	content, err := ioutil.ReadAll(response.Body)
-	assert.Nil(t, err)
-	assert.NotEmpty(t, content)
-	assert.Equal(t, "pong", string(content))
+	message := new(client.MessageResponse)
+	getJSON(testAPIPath("ping"), message, t)
+	assert.NotNil(t, message)
+	assert.NotEmpty(t, message.Message)
+	assert.Equal(t, "pong", message.Message)
 }
 
 func TestAPIRegistrations(t *testing.T) {
@@ -61,4 +77,12 @@ func TestAPIRegistrations(t *testing.T) {
 	content, err := ioutil.ReadAll(response.Body)
 	assert.Nil(t, err)
 	assert.NotEmpty(t, content)
+}
+
+func TestAPISubscribe(t *testing.T) {
+	s := new(client.Subscription)
+	s.Endpoint = "127.0.0.1:8080"
+	s.ID = "test"
+	//s.Requests = make([]client.APIHook, 0)
+
 }

@@ -12,17 +12,14 @@ VERSION=$(shell awk '/const Version/ { print $$4 }' version.go | sed 's/"//g')
 .PHONY: build docker clean test
 
 build:
-	mkdir -p ./bin/
-	go build -o ./bin/bridgeio
+	(mkdir -p ./bin && cd cmd/bridge && go build -o ../../bin/bridge)
 
 docker: build
 	docker build -t ${AUTHOR}/${NAME} .
 
 clean:
-	rm -f bin/bridgeio
+	rm -f bin/bridge
 
 test:
 	go test -v ./...
-
-
 

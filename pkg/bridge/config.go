@@ -11,30 +11,39 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package main
+package bridge
 
 import (
 	"encoding/json"
+	"fmt"
 	"io/ioutil"
 	"strings"
 
-	"github.com/gambol99/bridge.io/client"
+	"github.com/gambol99/bridge.io/pkg/bridge/client"
 
 	"github.com/golang/glog"
 )
+
+func (r Config) String() string {
+	return fmt.Sprintf(`
+Server API: %s
+Pipes: %s
+Verbosity: %d
+`, r.ApiBinding, r.Pipes, r.Verbosity)
+}
 
 // Returns a default configuration
 func DefaultConfig() *Config {
 	config := new(Config)
 	config.ApiBinding = DEFAULT_API_BINDING
-	config.Pipes = []string{DEFAULT_PIPE}
+	config.Pipes = []string{}
 	config.Subscriptions = make([]*client.Subscription, 0)
 	return config
 }
 
 // Load the configuration for the bridge from the config file
 // 	filename:		the full path to the configuration file
-func loadConfig(filename string) (*Config, error) {
+func LoadConfig(filename string) (*Config, error) {
 	if content, err := loadFile(filename); err != nil {
 		return nil, err
 	} else {

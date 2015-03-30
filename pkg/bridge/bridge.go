@@ -11,12 +11,12 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package main
+package bridge
 
 import (
 	"sync"
 
-	"github.com/gambol99/bridge.io/client"
+	"github.com/gambol99/bridge.io/pkg/bridge/client"
 
 	log "github.com/Sirupsen/logrus"
 )
@@ -26,19 +26,18 @@ type BridgeImpl struct {
 	sync.RWMutex
 	// the configuration
 	config *Config
-	// the prehooks
-	subscriptions []*client.Subscription
-	// api
+	// the subscriptions
+	subscriptions map[string]*client.Subscription
+	// the bridge api server
 	api *BridgeAPI
 }
 
 // Create a new bridge
 func NewBridge(cfg *Config) (Bridge, error) {
-	log.Infof("Creating a new docker bridge")
 	var err error
 	bridge := &BridgeImpl{
-		config: cfg,
-		subscriptions:  make([]*client.Subscription, 0),
+		config:        cfg,
+		subscriptions: make(map[string]*client.Subscription, 0),
 	}
 
 	// step: create an bridge api
@@ -50,16 +49,37 @@ func NewBridge(cfg *Config) (Bridge, error) {
 	return bridge, nil
 }
 
-func (b *BridgeImpl) PreHookEvent() error {
+func (b *BridgeImpl) Close() error {
 
 	return nil
 }
 
-func (b *BridgeImpl) PostHookEvent() error {
+func (b *BridgeImpl) Add(subscription *client.Subscription) (string, error) {
+	log.Infof("Attempting to add the subscription: %s", subscription)
+
+	return "", nil
+}
+
+// remove a subscription from the bridge
+func (b *BridgeImpl) Remove(id string) error {
+	log.Infof("Attempting to remove the subscription id: %s", id)
 
 	return nil
 }
 
-func (b *BridgeImpl) Subscriptions() []*client.Subscription {
+func (b *BridgeImpl) PreHookEvent(request []byte) ([]byte, error) {
+	log.Infof("Bridge recieved a pre hook request")
+
+
+	return request, nil
+}
+
+func (b *BridgeImpl) PostHookEvent(request []byte) ([]byte, error) {
+	log.Infof("Bridge recieved a post hook request")
+
+	return request, nil
+}
+
+func (b *BridgeImpl) Subscriptions() map[string]*client.Subscription {
 	return b.subscriptions
 }
