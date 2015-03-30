@@ -11,7 +11,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package main
+package bridge
 
 import (
 	"bytes"
@@ -30,7 +30,6 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/justinas/alice"
 )
-
 
 func NewPipe(source, sink *url.URL, bridge *Bridge) (*Pipe, error) {
 	var err error
@@ -58,7 +57,7 @@ func NewPipe(source, sink *url.URL, bridge *Bridge) (*Pipe, error) {
 
 	// create the handler chain
 	middleware := alice.New(pipe.recoveryHandler, pipe.loggingHandler,
-	pipe.preSinkRequestHandler, pipe.postSinkRequestHandler).ThenFunc(pipe.finalHandler)
+		pipe.preSinkRequestHandler, pipe.postSinkRequestHandler).ThenFunc(pipe.finalHandler)
 
 	// create the router and apply the chain
 	router := mux.NewRouter()

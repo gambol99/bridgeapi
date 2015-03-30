@@ -11,7 +11,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package main
+package bridge
 
 import (
 	"bytes"
@@ -84,7 +84,6 @@ func (r *BridgeAPI) handleSubscriptions(writer http.ResponseWriter, request *htt
 		return
 	}
 
-
 	writer.Write([]byte(content))
 }
 
@@ -97,19 +96,17 @@ func (r *BridgeAPI) handleUnsubscribe(writer http.ResponseWriter, request *http.
 
 	// send a request to remove from the bridge
 
-
 }
 
-func (r *BridgeAPI) errorMessage(writer http.ResponseWriter, request *http.Request, message string, args...interface {}) {
+func (r *BridgeAPI) errorMessage(writer http.ResponseWriter, request *http.Request, message string, args ...interface{}) {
 	msg := &ResponseMessage{
-		Status: "error",
+		Status:  "error",
 		Message: fmt.Sprintf(message, args...),
 	}
 	r.sendResponse(writer, request, msg)
 }
 
-func (r *BridgeAPI) sendResponse(writer http.ResponseWriter, request *http.Request, data interface {}) {
-
+func (r *BridgeAPI) sendResponse(writer http.ResponseWriter, request *http.Request, data interface{}) {
 
 }
 

@@ -11,9 +11,4 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package main
-
-func createTestBridge(cfg *Config) Bridge {
-	bridge, _ := NewBridge(cfg)
-	return bridge
-}
+package bridge

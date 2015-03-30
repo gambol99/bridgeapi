@@ -11,16 +11,17 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package main
+package bridge
 
 import (
+	"fmt"
+	"io/ioutil"
 	"net/http"
 	"testing"
 
-	"fmt"
-	"github.com/stretchr/testify/assert"
+	"github.com/gambol99/bridge.io/client"
 
-	"io/ioutil"
+	"github.com/stretchr/testify/assert"
 )
 
 const (
@@ -61,4 +62,12 @@ func TestAPIRegistrations(t *testing.T) {
 	content, err := ioutil.ReadAll(response.Body)
 	assert.Nil(t, err)
 	assert.NotEmpty(t, content)
+}
+
+func TestAPISubscribe(t *testing.T) {
+	s := new(client.Subscription)
+	s.Endpoint = "127.0.0.1:8080"
+	s.ID = "test"
+	//s.Requests = make([]client.APIHook, 0)
+
 }

@@ -11,7 +11,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package main
+package bridge
 
 import (
 	"sync"
@@ -37,8 +37,8 @@ func NewBridge(cfg *Config) (Bridge, error) {
 	log.Infof("Creating a new docker bridge")
 	var err error
 	bridge := &BridgeImpl{
-		config: cfg,
-		subscriptions:  make([]*client.Subscription, 0),
+		config:        cfg,
+		subscriptions: make([]*client.Subscription, 0),
 	}
 
 	// step: create an bridge api

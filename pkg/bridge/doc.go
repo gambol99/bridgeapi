@@ -11,7 +11,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package main
+package bridge
 
 import (
 	"errors"
@@ -29,7 +29,7 @@ const (
 	DEFAULT_API_PORT      = "8989"
 	DEFAULT_API_BINDING   = DEFAULT_API_INTERFACE + ":" + DEFAULT_API_PORT
 	DEFAULT_PIPE          = "unix://var/run/docker.socket,unix://var/run/docker.sock"
-	SESSION_REQUEST  	  = "sess_request"
+	SESSION_REQUEST       = "sess_request"
 	SESSION_HIJACKED      = "sess_hijacked"
 )
 
@@ -88,4 +88,3 @@ type BridgeAPI struct {
 	// a reference to the bridge
 	bridge Bridge
 }
-

@@ -11,7 +11,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package main
+package bridge
 
 import (
 	"encoding/json"
@@ -34,7 +34,7 @@ func DefaultConfig() *Config {
 
 // Load the configuration for the bridge from the config file
 // 	filename:		the full path to the configuration file
-func loadConfig(filename string) (*Config, error) {
+func LoadConfig(filename string) (*Config, error) {
 	if content, err := loadFile(filename); err != nil {
 		return nil, err
 	} else {
