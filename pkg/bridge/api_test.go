@@ -83,6 +83,10 @@ func TestAPISubscribe(t *testing.T) {
 	s := new(client.Subscription)
 	s.Endpoint = "127.0.0.1:8080"
 	s.ID = "test"
-	//s.Requests = make([]client.APIHook, 0)
+	s.Requests = make([]*client.APIHook, 0)
+	hk := new(client.APIHook)
+	hk.Enforcing = false
+	hk.HookType = "PRE"
+	hk.URI = "*/containers/start"
 
 }
