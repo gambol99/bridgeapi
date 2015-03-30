@@ -26,9 +26,9 @@ import (
 
 func (r Config) String() string {
 	return fmt.Sprintf(`
-Server API: %s
-Pipes: %s
-Verbosity: %d
+  Server API: %s
+  Pipes: %s
+  Verbosity: %d
 `, r.ApiBinding, r.Pipes, r.Verbosity)
 }
 
