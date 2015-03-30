@@ -15,15 +15,15 @@ package bridge
 
 import (
 	"bytes"
-    "encoding/json"
-    "encoding/xml"
-    "io/ioutil"
-    "net/http"
-    "strings"
+	"encoding/json"
+	"encoding/xml"
+	"io/ioutil"
+	"net/http"
+	"strings"
 )
 
 func decodeByContent(request *http.Request, data interface{}) (string, error) {
-    // read in the content from the request
+	// read in the content from the request
 	content, err := ioutil.ReadAll(request.Body)
 	if err != nil {
 		return "", err
@@ -31,12 +31,12 @@ func decodeByContent(request *http.Request, data interface{}) (string, error) {
 
 	// we get the content type and decode appropriately
 	ct := getRequestContentType(request, "application/json")
-    switch ct {
-    case "application/xml":
-        err = xml.NewDecoder(strings.NewReader(string(content))).Decode(data)
-    default:
-        err = json.NewDecoder(strings.NewReader(string(content))).Decode(data)
-    }
+	switch ct {
+	case "application/xml":
+		err = xml.NewDecoder(strings.NewReader(string(content))).Decode(data)
+	default:
+		err = json.NewDecoder(strings.NewReader(string(content))).Decode(data)
+	}
 
 	return ct, err
 }
@@ -47,28 +47,27 @@ func encodeByContent(request *http.Request, data interface{}) ([]byte, string, e
 	ct := getRequestAcceptType(request, "application/json")
 	switch ct {
 	case "application/xml":
-        err = xml.NewEncoder(&buffer).Encode(data)
+		err = xml.NewEncoder(&buffer).Encode(data)
 	default:
-        err = json.NewEncoder(&buffer).Encode(data)
+		err = json.NewEncoder(&buffer).Encode(data)
 	}
-    return buffer.Bytes(), ct, err
+	return buffer.Bytes(), ct, err
 }
 
 // Retrieve the content type from the request, otherwise we default
 func getRequestContentType(request *http.Request, default_type string) string {
-    return getRequestHeader(request, "Content-Type", default_type)
+	return getRequestHeader(request, "Content-Type", default_type)
 }
 
 // Retrieve the http accept type of defaults
 func getRequestAcceptType(request *http.Request, default_type string) string {
-    return getRequestHeader(request, "Accept", default_type)
+	return getRequestHeader(request, "Accept", default_type)
 }
 
 func getRequestHeader(request *http.Request, header string, dft string) string {
-    ct := request.Header.Get(header)
-    if ct == "" {
-        return dft
-    }
-    return ct
+	ct := request.Header.Get(header)
+	if ct == "" {
+		return dft
+	}
+	return ct
 }
-

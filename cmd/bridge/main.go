@@ -23,8 +23,8 @@ import (
 
 	"github.com/gambol99/bridge.io/pkg/bridge"
 
-	"github.com/alecthomas/kingpin"
 	log "github.com/Sirupsen/logrus"
+	"github.com/alecthomas/kingpin"
 )
 
 var (
@@ -135,7 +135,7 @@ func parseConfiguration() (*bridge.Config, error) {
 }
 
 // validates we have everything we need in the configuration
-func validateConfiguration(config *bridge.Config ) (*bridge.Config, error) {
+func validateConfiguration(config *bridge.Config) (*bridge.Config, error) {
 	if config.ApiBinding == "" {
 		return nil, fmt.Errorf("You have not specified a binding for the api service")
 	}
@@ -145,4 +145,3 @@ func validateConfiguration(config *bridge.Config ) (*bridge.Config, error) {
 	}
 	return config, nil
 }
-

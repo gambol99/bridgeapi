@@ -25,10 +25,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/justinas/alice"
-	"github.com/gorilla/context"
 	log "github.com/Sirupsen/logrus"
+	"github.com/gorilla/context"
 	"github.com/gorilla/mux"
+	"github.com/justinas/alice"
 	"os"
 	"strings"
 )
@@ -128,7 +128,7 @@ func (pipe *PipeImpl) preSinkRequestHandler(next http.Handler) http.Handler {
 		}
 
 		// BRIDGE PRE HOOK CALL
-		if content, err = pipe.bridge.PreHookEvent(content); err != nil {
+		if content, err = pipe.bridge.PreHookEvent(request.RequestURI, content); err != nil {
 			log.Errorf("Failed to call the bridge pre hook, error: %s", err)
 		}
 
@@ -185,7 +185,7 @@ func (pipe *PipeImpl) postSinkRequestHandler(next http.Handler) http.Handler {
 			}
 
 			// BRIDGE POST HOOK CALL
-			if content, err = pipe.bridge.PostHookEvent(content); err != nil {
+			if content, err = pipe.bridge.PostHookEvent(request.RequestURI, content); err != nil {
 				log.Errorf("Failed to call the bridge post hook, error: %s", err)
 			}
 

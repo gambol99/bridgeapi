@@ -14,13 +14,16 @@ limitations under the License.
 package client
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
+	"io/ioutil"
 	"net"
 	"net/http"
 	"net/url"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -48,7 +51,7 @@ type ClientImpl struct {
 
 // Create a new client to communicate with the bridge
 //	config:		 	the configuration to use with the client
-func New(cfg *Config) (Client, error) {
+func NewClient(cfg *Config) (Client, error) {
 	var err error
 	if cfg == nil {
 		return nil, errors.New("you have not specified any configuration")
@@ -92,14 +95,29 @@ func (r *ClientImpl) Close() error {
 // 	register:		the registration structure containing the hooks
 //  channel:		the channel you want to receive the api requests on
 func (r *ClientImpl) Subscribe(register *Subscription, channel RequestsChannel) (string, error) {
-
-	return "", nil
+	if err := register.Valid(); err != nil {
+		return "", err
+	}
+	r.requests = channel
+	response := new(SubscriptionResponse)
+	_, err := r.send("POST", API_SUBSCRIPTION, register, response)
+	if err != nil {
+		return "", err
+	}
+	return response.ID, nil
 }
 
 // Unregister from the bridge.io service
 // 	id:				the registration id which was given when you registered
 func (r *ClientImpl) Unsubscribe(id string) error {
-
+	uri := fmt.Sprintf("%s/%s", API_SUBSCRIPTION, id)
+	code, err := r.send("DELETE", uri, nil, nil)
+	if err != nil {
+		return err
+	}
+	if code != 200 {
+		return fmt.Errorf("failed to unsubscribe the id: %s", id)
+	}
 	return nil
 }
 
@@ -132,9 +150,7 @@ func (r *ClientImpl) setupHttpService(client *ClientImpl) error {
 	}
 	// step: start listening
 	go func() {
-		if err := client.server.ListenAndServe(); err != nil {
-			log.Fatalf("failed to start the http service, error: %s", err)
-		}
+		client.server.ListenAndServe()
 	}()
 
 	return nil
@@ -155,13 +171,56 @@ func (r *ClientImpl) handleRequest(writer http.ResponseWriter, request *http.Req
 		select {
 		case response := <-req.Response:
 			// step: we encode the response
-			_, err := r.encodeRequest(response)
+			content, err := r.encodeRequest(response)
 			if err != nil {
-
+				return
 			}
+
+			w.WriteHeader(200)
+			w.Write(content)
 
 		case <-time.After(r.config.MaxTime):
 			w.Write([]byte("timeout"))
 		}
 	}(writer, request)
 }
+
+// Send a json request to the bridge, get and decode the response
+//	uri:		the uri on the bridge to target
+//  result:		the data structure we should decode into
+func (r *ClientImpl) send(method, uri string, data, result interface {}) (int, error) {
+	// step: encode the post data
+	var buffer bytes.Buffer
+	if data != nil {
+		err := json.NewEncoder(&buffer).Encode(data)
+		if err != nil {
+			return 0, fmt.Errorf("Failed to encode the data for request, error: %s", err)
+		}
+	}
+
+	// step: we compose the request
+	request, err := http.NewRequest(method, uri, &buffer)
+	if err != nil {
+		return 0, fmt.Errorf("Failed to compose the request to the bridge, error: %s", err)
+	}
+
+	// step: we perform the request
+	response, err := r.client.Do(request)
+	if err != nil {
+		return response.StatusCode, fmt.Errorf("Failed to perform bridge request: %s, error: %s", uri, err)
+	}
+
+	// step: read in the response
+	content, err := ioutil.ReadAll(response.Body)
+	if err != nil {
+		return response.StatusCode, fmt.Errorf("Failed to read in the response body, error: %s", err)
+	}
+
+	// step: decode the response
+	err = json.NewDecoder(strings.NewReader(string(content))).Decode(result)
+	if err != nil {
+		return response.StatusCode, fmt.Errorf("Failed to decode the response, error: %s", err)
+	}
+	return response.StatusCode, nil
+}
+

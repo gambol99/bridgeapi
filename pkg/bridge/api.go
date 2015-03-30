@@ -20,18 +20,10 @@ import (
 
 	"github.com/gambol99/bridge.io/pkg/bridge/client"
 
-	"github.com/justinas/alice"
 	log "github.com/Sirupsen/logrus"
 	"github.com/gorilla/mux"
+	"github.com/justinas/alice"
 )
-
-const (
-	API_VERSION      = "/v1"
-	API_PING         = API_VERSION + "/ping"
-	API_SUBSCRIBE    = API_VERSION + "/subscribe"
-	API_SUBSCRIPTION = API_VERSION + "/subscriptions"
-)
-
 
 // the implementation for the rest api
 func NewBridgeAPI(cfg *Config, bridge Bridge) (*BridgeAPI, error) {
@@ -43,10 +35,10 @@ func NewBridgeAPI(cfg *Config, bridge Bridge) (*BridgeAPI, error) {
 
 	// step: we construct the webservice
 	router := mux.NewRouter()
-	router.Handle(API_PING, middleware.ThenFunc(api.pingHandler)).Methods("GET")
-	router.Handle(API_SUBSCRIBE, middleware.ThenFunc(api.subscribeHandler)).Methods("POST")
-	router.Handle(API_SUBSCRIPTION, middleware.ThenFunc(api.subscriptionsHandler)).Methods("GET")
-	router.Handle(API_SUBSCRIPTION+"/{id}", middleware.ThenFunc(api.unsubscribeHandler)).Methods("DELETE")
+	router.Handle(client.API_PING, middleware.ThenFunc(api.pingHandler)).Methods("GET")
+	router.Handle(client.API_SUBSCRIBE, middleware.ThenFunc(api.subscribeHandler)).Methods("POST")
+	router.Handle(client.API_SUBSCRIPTION, middleware.ThenFunc(api.subscriptionsHandler)).Methods("GET")
+	router.Handle(client.API_SUBSCRIPTION+"/{id}", middleware.ThenFunc(api.unsubscribeHandler)).Methods("DELETE")
 	api.router = router
 
 	// step: we start listening
@@ -104,7 +96,7 @@ func (r *BridgeAPI) subscribeHandler(writer http.ResponseWriter, request *http.R
 		return
 	}
 	// step: compose the response
-	r.send(writer, request, &client.SubscriptionResponse{ ID: id, })
+	r.send(writer, request, &client.SubscriptionResponse{ID: id})
 }
 
 func (r *BridgeAPI) subscriptionsHandler(writer http.ResponseWriter, request *http.Request) {
@@ -121,7 +113,6 @@ func (r *BridgeAPI) unsubscribeHandler(writer http.ResponseWriter, request *http
 	}
 
 	// check the subscription id exists
-
 
 	// send a request to remove from the bridge
 
@@ -146,4 +137,3 @@ func (r *BridgeAPI) send(writer http.ResponseWriter, request *http.Request, data
 	writer.Write(content)
 	return nil
 }
-

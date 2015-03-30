@@ -28,7 +28,6 @@ const (
 	DEFAULT_API_INTERFACE = "127.0.0.1"
 	DEFAULT_API_PORT      = "8989"
 	DEFAULT_API_BINDING   = DEFAULT_API_INTERFACE + ":" + DEFAULT_API_PORT
-	DEFAULT_PIPE          = "unix://var/run/docker.socket,unix://var/run/docker.sock"
 	SESSION_REQUEST       = "sess_request"
 	SESSION_HIJACKED      = "sess_hijacked"
 )
@@ -44,11 +43,11 @@ var (
 //
 type Bridge interface {
 	// a prehook event, i.e. before the request has been passed though to docker
-	PreHookEvent([]byte) ([]byte, error)
+	PreHookEvent(string, []byte) ([]byte, error)
 	// a post event, i.e. the response from the sink api
-	PostHookEvent([]byte) ([]byte, error)
+	PostHookEvent(string, []byte) ([]byte, error)
 	// hand back a list of subscriptions
-	Subscriptions() map[string]*client.Subscription
+	Subscriptions() []*client.Subscription
 	// add a new subscription
 	Add(*client.Subscription) (string, error)
 	// remove a subscription from the bridge

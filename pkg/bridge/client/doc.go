@@ -24,6 +24,13 @@ const (
 	DEFAULT_BINDING_PORT      = "8787"
 	DEFAULT_BINDING_INTERFACE = "0.0.0.0"
 	DEFAULT_BINDING           = DEFAULT_BINDING_INTERFACE + ":" + DEFAULT_BINDING_PORT
+	PRE_EVENT                 = "PRE"
+	POST_EVENT                = "POST"
+
+	API_VERSION      = "/v1"
+	API_PING         = API_VERSION + "/ping"
+	API_SUBSCRIBE    = API_VERSION + "/subscribe"
+	API_SUBSCRIPTION = API_VERSION + "/subscriptions"
 )
 
 var (
@@ -74,6 +81,7 @@ type APIRequest struct {
 // A registration request structure: used buy the client register for hook events
 // into the API
 type Subscription struct {
+	SubscriptionID string
 	// an application ID
 	ID string `json:"id"`
 	// the endpoint to send these requests

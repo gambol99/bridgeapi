@@ -60,11 +60,11 @@ func (r *ClientImpl) decodeRequest(content string) (*APIRequest, error) {
 	return api_request, nil
 }
 
-func (r *ClientImpl) encodeRequest(request *APIRequest) (string, error) {
+func (r *ClientImpl) encodeRequest(request *APIRequest) ([]byte, error) {
 	buf := new(bytes.Buffer)
 	err := json.NewEncoder(buf).Encode(request)
 	if err != nil {
-		return "", err
+		return []byte{}, err
 	}
-	return buf.String(), nil
+	return buf.Bytes(), nil
 }

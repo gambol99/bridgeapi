@@ -38,8 +38,8 @@ func testAPIPath(uri string) string {
 	return fmt.Sprintf("http://%s/%s/%s", API_BINDING, API_VERSION, uri)
 }
 
-func getJSON(url string, result interface {}, t *testing.T) {
-  	response, err := http.Get(url)
+func getJSON(url string, result interface{}, t *testing.T) {
+	response, err := http.Get(url)
 	if err != nil {
 		t.Fatal("Failed to perform the http get: %s, error: %s", url, err)
 	}
