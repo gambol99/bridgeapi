@@ -4,4 +4,12 @@
 #
 #  vim:ts=2:sw=2:et
 #
+FROM progrium/busybox
+MAINTAINER Rohith Jayawardene <gambol99@gmail.com>
 
+ADD ./bin/bridge/bridge /bin/bridge
+RUN opkg-install curl
+RUN chmod +x /bin/bridge
+
+EXPOSE 8080
+ENTRYPOINT [ "/bin/bridge" ]

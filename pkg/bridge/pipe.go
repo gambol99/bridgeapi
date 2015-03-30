@@ -25,17 +25,20 @@ import (
 	"sync"
 	"time"
 
-	log "github.com/Sirupsen/logrus"
-	"github.com/gorilla/context"
-	"github.com/gorilla/mux"
 	"github.com/justinas/alice"
+	"github.com/gorilla/context"
+	log "github.com/Sirupsen/logrus"
+	"github.com/gorilla/mux"
+	"os"
+	"strings"
 )
 
-func NewPipe(source, sink *url.URL, bridge *Bridge) (*Pipe, error) {
+func NewPipe(source, sink *url.URL, bridge Bridge) (Pipe, error) {
 	var err error
 
-	pipe := new(Pipe)
+	pipe := new(PipeImpl)
 	pipe.source = source
+	pipe.bridge = bridge
 	pipe.sink = sink
 	pipe.client = &http.Client{}
 
@@ -72,12 +75,28 @@ func NewPipe(source, sink *url.URL, bridge *Bridge) (*Pipe, error) {
 		WriteTimeout:   time.Duration(30) * time.Second,
 		MaxHeaderBytes: 1 << 20,
 	}
+	pipe.server.SetKeepAlivesEnabled(true)
 
 	go pipe.server.Serve(pipe.listener)
 	return pipe, nil
 }
 
-func (pipe *Pipe) recoveryHandler(next http.Handler) http.Handler {
+func (pipe *PipeImpl) Close() error {
+	// remove any
+	if pipe.source.Scheme == "unix" {
+		if err := os.Remove(strings.Join([]string{"/", pipe.source.Host, pipe.source.Path}, "")); err != nil {
+			log.Errorf("Failed to remove the unix socket: %s, error: %s", pipe.source.String(), err)
+		}
+	}
+	if pipe.sink.Scheme == "unix" {
+		if err := os.Remove(strings.Join([]string{"/", pipe.sink.Host, pipe.sink.Path}, "")); err != nil {
+			log.Errorf("Failed to remove the unix socket: %s, error: %s", pipe.sink.String(), err)
+		}
+	}
+	return nil
+}
+
+func (pipe *PipeImpl) recoveryHandler(next http.Handler) http.Handler {
 	fn := func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
 			if err := recover(); err != nil {
@@ -89,29 +108,29 @@ func (pipe *Pipe) recoveryHandler(next http.Handler) http.Handler {
 	return http.HandlerFunc(fn)
 }
 
-func (pipe *Pipe) loggingHandler(next http.Handler) http.Handler {
+func (pipe *PipeImpl) loggingHandler(next http.Handler) http.Handler {
 	fn := func(w http.ResponseWriter, request *http.Request) {
+		log.Infof("Recieved request %s:%q", request.Method, request.URL.String())
 		start_time := time.Now()
 		next.ServeHTTP(w, request)
 		end_time := time.Now()
-		log.Infof("[%s] %q %v", request.Method, request.URL.String(), end_time.Sub(start_time))
+		log.Infof("Processed request %s:%q in %v", request.Method, request.URL.String(), end_time.Sub(start_time))
 	}
 	return http.HandlerFunc(fn)
 }
 
-func (pipe *Pipe) preSinkRequestHandler(next http.Handler) http.Handler {
+func (pipe *PipeImpl) preSinkRequestHandler(next http.Handler) http.Handler {
 	fn := func(w http.ResponseWriter, request *http.Request) {
 		// generate the url and read in the original content
 		content, err := pipe.extractRequestBody(request)
 		if err != nil {
 			log.Panicf("failed to read in the request body from the original request, error: %s", err)
 		}
-		log.Infof("Request from url: %s, content: %s", pipe.parseForwardingURL(request), content)
 
-		// check with the bridge to see if anyone is looking to hook into the
-		// API request
-
-		// BRIDGE GOES HERE!!
+		// BRIDGE PRE HOOK CALL
+		if content, err = pipe.bridge.PreHookEvent(content); err != nil {
+			log.Errorf("Failed to call the bridge pre hook, error: %s", err)
+		}
 
 		// we inject the mutated response into the context
 		context.Set(request, SESSION_REQUEST, content)
@@ -123,7 +142,7 @@ func (pipe *Pipe) preSinkRequestHandler(next http.Handler) http.Handler {
 
 // The handler is responsible for processing the response from the sink and forwarding
 // to anyone that is
-func (pipe *Pipe) postSinkRequestHandler(next http.Handler) http.Handler {
+func (pipe *PipeImpl) postSinkRequestHandler(next http.Handler) http.Handler {
 	fn := func(w http.ResponseWriter, request *http.Request) {
 		// we retrieve the request from the context
 		mutation := (context.Get(request, SESSION_REQUEST)).([]byte)
@@ -135,8 +154,6 @@ func (pipe *Pipe) postSinkRequestHandler(next http.Handler) http.Handler {
 		}
 
 		if !hijacking {
-
-			// BRIDGE GOES HERE!!!
 
 			// the forwarded url
 			forward_url := pipe.parseForwardingURL(request)
@@ -167,11 +184,16 @@ func (pipe *Pipe) postSinkRequestHandler(next http.Handler) http.Handler {
 				log.Panicf("failed to read in the content from the sink response, error: %s", err)
 			}
 
-			if len(mutation) > 0 {
-				forwarded.Header.Add("Content-Length", fmt.Sprintf("%d", len(mutation)))
+			// BRIDGE POST HOOK CALL
+			if content, err = pipe.bridge.PostHookEvent(content); err != nil {
+				log.Errorf("Failed to call the bridge post hook, error: %s", err)
 			}
 
-			// write the content back to the clinet
+			if len(content) > 0 {
+				forwarded.Header.Add("Content-Length", fmt.Sprintf("%d", len(content)))
+			}
+
+			// write the content back to the client
 			for _, header := range headers {
 				if response.Header.Get(header) != "" {
 					w.Header().Add(header, response.Header.Get(header))
@@ -194,7 +216,7 @@ func (pipe *Pipe) postSinkRequestHandler(next http.Handler) http.Handler {
 	return http.HandlerFunc(fn)
 }
 
-func (pipe *Pipe) hijack(w http.ResponseWriter, request *http.Request) error {
+func (pipe *PipeImpl) hijack(w http.ResponseWriter, request *http.Request) error {
 	// firstly, we check we can hijack
 	log.Infof("Hijacking the connection to sink")
 
@@ -258,11 +280,11 @@ func (pipe *Pipe) hijack(w http.ResponseWriter, request *http.Request) error {
 }
 
 // The is effectivily a noop, perhaps using it for an audit trail
-func (pipe *Pipe) finalHandler(w http.ResponseWriter, r *http.Request) {
+func (pipe *PipeImpl) finalHandler(w http.ResponseWriter, r *http.Request) {
 
 }
 
-func (pipe *Pipe) extractRequestBody(request *http.Request) ([]byte, error) {
+func (pipe *PipeImpl) extractRequestBody(request *http.Request) ([]byte, error) {
 	if request.ContentLength > 0 || request.ContentLength < 0 {
 		content, err := ioutil.ReadAll(request.Body)
 		if err != nil {
@@ -273,7 +295,7 @@ func (pipe *Pipe) extractRequestBody(request *http.Request) ([]byte, error) {
 	return []byte{}, nil
 }
 
-func (pipe *Pipe) extractResponseBody(response *http.Response) ([]byte, error) {
+func (pipe *PipeImpl) extractResponseBody(response *http.Response) ([]byte, error) {
 	if response.ContentLength > 0 || response.ContentLength < 0 {
 		content, err := ioutil.ReadAll(response.Body)
 		if err != nil {
@@ -284,7 +306,7 @@ func (pipe *Pipe) extractResponseBody(response *http.Response) ([]byte, error) {
 	return []byte{}, nil
 }
 
-func (pipe *Pipe) tranferBytes(src io.Reader, dest io.Writer, wg *sync.WaitGroup) {
+func (pipe *PipeImpl) tranferBytes(src io.Reader, dest io.Writer, wg *sync.WaitGroup) {
 	defer wg.Done()
 	copied, err := io.Copy(dest, src)
 	if err != nil {
@@ -295,13 +317,13 @@ func (pipe *Pipe) tranferBytes(src io.Reader, dest io.Writer, wg *sync.WaitGroup
 	log.Infof("Copied %d bytes on hijacked connections", copied)
 }
 
-func (pipe *Pipe) parseForwardingURL(request *http.Request) string {
+func (pipe *PipeImpl) parseForwardingURL(request *http.Request) string {
 	host := pipe.parseForwardingHost(request)
 	uri := pipe.parseForwardingURI(request)
 	return fmt.Sprintf("%s%s", host, uri)
 }
 
-func (pipe *Pipe) parseForwardingURI(request *http.Request) string {
+func (pipe *PipeImpl) parseForwardingURI(request *http.Request) string {
 	uri := request.URL.RequestURI()
 	if request.URL.Query() != nil && len(request.URL.Query()) > 0 {
 		uri = fmt.Sprintf("%s?%s", uri, request.URL.RawQuery)
@@ -309,7 +331,7 @@ func (pipe *Pipe) parseForwardingURI(request *http.Request) string {
 	return uri
 }
 
-func (pipe *Pipe) parseForwardingHost(request *http.Request) string {
+func (pipe *PipeImpl) parseForwardingHost(request *http.Request) string {
 	host := ""
 	switch pipe.sink.Scheme {
 	case "tcp":

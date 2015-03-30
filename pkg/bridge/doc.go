@@ -19,7 +19,7 @@ import (
 	"net/http"
 	"net/url"
 
-	"github.com/gambol99/bridge.io/client"
+	"github.com/gambol99/bridge.io/pkg/bridge/client"
 
 	"github.com/gorilla/mux"
 )
@@ -44,20 +44,33 @@ var (
 //
 type Bridge interface {
 	// a prehook event, i.e. before the request has been passed though to docker
-	PreHookEvent() error
+	PreHookEvent([]byte) ([]byte, error)
 	// a post event, i.e. the response from the sink api
-	PostHookEvent() error
+	PostHookEvent([]byte) ([]byte, error)
 	// hand back a list of subscriptions
-	Subscriptions() []*client.Subscription
+	Subscriptions() map[string]*client.Subscription
+	// add a new subscription
+	Add(*client.Subscription) (string, error)
+	// remove a subscription from the bridge
+	Remove(string) error
+	// shutdown and release the resources
+	Close() error
+}
+
+// an interface for the pipe
+type Pipe interface {
+	Close() error
 }
 
 // A pipe is source and sink connection to the docker api
 // i.e. create unix://var/run/docker.sock -> tcp://0.0.0.0:2375
-type Pipe struct {
+type PipeImpl struct {
 	// the source of pipe
 	source *url.URL
 	// the sink of the pipe
 	sink *url.URL
+	// a reference to the bridge
+	bridge Bridge
 	// the listener for the service
 	listener net.Listener
 	// the http service running at source

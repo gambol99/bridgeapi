@@ -14,15 +14,14 @@ limitations under the License.
 package bridge
 
 import (
-	"bytes"
-	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"net/http"
-	"strings"
+	"time"
 
-	"github.com/gambol99/bridge.io/client"
+	"github.com/gambol99/bridge.io/pkg/bridge/client"
 
+	"github.com/justinas/alice"
+	log "github.com/Sirupsen/logrus"
 	"github.com/gorilla/mux"
 )
 
@@ -33,103 +32,118 @@ const (
 	API_SUBSCRIPTION = API_VERSION + "/subscriptions"
 )
 
-type ResponseMessage struct {
-	Status  string `json:"status"`
-	Message string `json:"message"`
-}
 
 // the implementation for the rest api
 func NewBridgeAPI(cfg *Config, bridge Bridge) (*BridgeAPI, error) {
 	api := new(BridgeAPI)
 	api.bridge = bridge
+
+	// step: create the middle handlers
+	middleware := alice.New(api.recoveryHandler, api.loggingHandler)
+
 	// step: we construct the webservice
 	router := mux.NewRouter()
-	router.HandleFunc(API_PING, api.handlePing)
-	router.HandleFunc(API_SUBSCRIBE, api.handleSubscribe).Methods("POST")
-	router.HandleFunc(API_SUBSCRIPTION, api.handleSubscriptions).Methods("GET")
-	router.HandleFunc(API_SUBSCRIPTION+"/{id}", api.handleUnsubscribe).Methods("DELETE")
+	router.Handle(API_PING, middleware.ThenFunc(api.pingHandler)).Methods("GET")
+	router.Handle(API_SUBSCRIBE, middleware.ThenFunc(api.subscribeHandler)).Methods("POST")
+	router.Handle(API_SUBSCRIPTION, middleware.ThenFunc(api.subscriptionsHandler)).Methods("GET")
+	router.Handle(API_SUBSCRIPTION+"/{id}", middleware.ThenFunc(api.unsubscribeHandler)).Methods("DELETE")
 	api.router = router
 
 	// step: we start listening
 	api.server = &http.Server{
 		Addr:    cfg.ApiBinding,
-		Handler: api.router,
+		Handler: router,
 	}
+
 	// step: start listening to the requests
 	go api.server.ListenAndServe()
 	return api, nil
 }
 
-func (r *BridgeAPI) handlePing(writer http.ResponseWriter, request *http.Request) {
-	writer.Write([]byte("pong"))
+func (r *BridgeAPI) recoveryHandler(next http.Handler) http.Handler {
+	fn := func(wr http.ResponseWriter, req *http.Request) {
+		defer func() {
+			if err := recover(); err != nil {
+				http.Error(wr, http.StatusText(500), 500)
+			}
+		}()
+		next.ServeHTTP(wr, req)
+	}
+	return http.HandlerFunc(fn)
 }
 
-func (r *BridgeAPI) handleSubscribe(writer http.ResponseWriter, request *http.Request) {
+func (r *BridgeAPI) loggingHandler(next http.Handler) http.Handler {
+	fn := func(wr http.ResponseWriter, req *http.Request) {
+		start_time := time.Now()
+		next.ServeHTTP(wr, req)
+		end_time := time.Now()
+		log.Infof("[%s] %q %v", req.Method, req.URL.String(), end_time.Sub(start_time))
+		next.ServeHTTP(wr, req)
+	}
+	return http.HandlerFunc(fn)
+}
+
+func (r *BridgeAPI) pingHandler(writer http.ResponseWriter, request *http.Request) {
+	msg := new(client.MessageResponse)
+	msg.Message = "pong"
+	r.send(writer, request, msg)
+}
+
+func (r *BridgeAPI) subscribeHandler(writer http.ResponseWriter, request *http.Request) {
+	// step: we grab and decode
 	subscription := new(client.Subscription)
-	if _, err := r.decode(request, subscription); err != nil {
-		http.Error(writer, "invalid request", 500)
+	if _, err := decodeByContent(request, subscription); err != nil {
+		r.errorMessage(writer, request, "unable to decode the request, error: %s", err)
 		return
 	}
-}
 
-func (r *BridgeAPI) handleSubscriptions(writer http.ResponseWriter, request *http.Request) {
-	// step: get the list of subscriptions
-	var response struct {
-		Subscriptions []*client.Subscription `json:"subscriptions"`
-	}
-	response.Subscriptions = r.bridge.Subscriptions()
-	content, err := r.encode(response)
+	// step: parse the request to the bridge
+	id, err := r.bridge.Add(subscription)
 	if err != nil {
-		http.Error(writer, "unable to encode the subscriptions", 500)
+		r.errorMessage(writer, request, "unable to add subscription, error: %s", err)
 		return
 	}
-
-	writer.Write([]byte(content))
+	// step: compose the response
+	r.send(writer, request, &client.SubscriptionResponse{ ID: id, })
 }
 
-func (r *BridgeAPI) handleUnsubscribe(writer http.ResponseWriter, request *http.Request) {
+func (r *BridgeAPI) subscriptionsHandler(writer http.ResponseWriter, request *http.Request) {
+	response := new(client.SubscriptionsResponse)
+	//response.Subscriptions = r.bridge.Subscriptions()
+	r.send(writer, request, response)
+}
+
+func (r *BridgeAPI) unsubscribeHandler(writer http.ResponseWriter, request *http.Request) {
 	id := mux.Vars(request)["id"]
 	if id == "" {
 		r.errorMessage(writer, request, "you have not specified the subscription id")
+		return
 	}
+
 	// check the subscription id exists
+
 
 	// send a request to remove from the bridge
 
 }
 
-func (r *BridgeAPI) errorMessage(writer http.ResponseWriter, request *http.Request, message string, args ...interface{}) {
-	msg := &ResponseMessage{
-		Status:  "error",
+func (r *BridgeAPI) errorMessage(writer http.ResponseWriter, request *http.Request, message string, args ...interface{}) error {
+	msg := &client.MessageResponse{
 		Message: fmt.Sprintf(message, args...),
 	}
-	r.sendResponse(writer, request, msg)
+	return r.send(writer, request, msg)
 }
 
-func (r *BridgeAPI) sendResponse(writer http.ResponseWriter, request *http.Request, data interface{}) {
-
-}
-
-func (r *BridgeAPI) decode(request *http.Request, data interface{}) (string, error) {
-	content, err := ioutil.ReadAll(request.Body)
+// Send a response back the client
+func (r *BridgeAPI) send(writer http.ResponseWriter, request *http.Request, data interface{}) error {
+	// encode to the appropriate content type
+	content, content_type, err := encodeByContent(request, data)
 	if err != nil {
-		return "", err
+		return err
 	}
-	err = json.NewDecoder(strings.NewReader(string(content))).Decode(data)
-	if err != nil {
-		return "", err
-	}
-	return string(content), nil
+	writer.Header().Set("Content-Type", content_type)
+	writer.WriteHeader(200)
+	writer.Write(content)
+	return nil
 }
 
-func (r *BridgeAPI) encode(data interface{}) (string, error) {
-	buffer := new(bytes.Buffer)
-	if err := json.NewEncoder(buffer).Encode(data); err != nil {
-		return "", nil
-	}
-	return buffer.String(), nil
-}
-
-func (r *BridgeAPI) apiPath(path string) string {
-	return fmt.Sprintf("/%s/%s", API_VERSION, path)
-}
