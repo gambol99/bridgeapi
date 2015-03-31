@@ -84,7 +84,7 @@ type Subscription struct {
 	// an application ID
 	ID string `json:"id"`
 	// the endpoint to send these requests
-	Endpoint string `json:"endpoint"`
+	Subscriber string `json:"subscriber"`
 	// an array of hook requests
 	Requests []*APIHook `json:"hooks"`
 }

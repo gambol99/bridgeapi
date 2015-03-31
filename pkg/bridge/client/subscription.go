@@ -29,7 +29,7 @@ func (r *Subscription) AddHook(h *APIHook) {
 func (r *Subscription) PreHook(uri string) *Subscription {
 	hook := &APIHook{
 		HookType: PRE_EVENT,
-		URI: uri,
+		URI:      uri,
 	}
 	r.AddHook(hook)
 	return r
@@ -38,7 +38,7 @@ func (r *Subscription) PreHook(uri string) *Subscription {
 func (r *Subscription) PostHook(uri string) *Subscription {
 	hook := &APIHook{
 		HookType: POST_EVENT,
-		URI: uri,
+		URI:      uri,
 	}
 	r.AddHook(hook)
 	return r
@@ -48,10 +48,10 @@ func (r Subscription) Valid() error {
 	if r.ID == "" {
 		return fmt.Errorf("You have not specified a application ID in the subscription")
 	}
-	if r.Endpoint == "" {
-		return fmt.Errorf("You have not specified an endpoint for the subscription")
+	if r.Subscriber == "" {
+		return fmt.Errorf("You have not specified an subscriber for the subscription")
 	}
-	if _, err := url.Parse(r.Endpoint); err != nil {
+	if _, err := url.Parse(r.Subscriber); err != nil {
 		return fmt.Errorf("The endpoint url is invalid, please check")
 	}
 	if len(r.Requests) <= 0 {

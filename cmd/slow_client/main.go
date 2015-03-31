@@ -26,18 +26,18 @@ var options struct {
 	// the endpoint for the bridge
 	bridge string
 	// the interface we should listen on
-	endpoint string
+	subscriber string
 	}
 
 func init() {
  	flag.StringVar(&options.bridge, "bridge", "unix://var/run/docker.sock", "the endpoint of the bridge")
-	flag.StringVar(&options.endpoint, "endpoint", "tcp://127.0.0.1:8989", "the interface we should be listening for events on")
+	flag.StringVar(&options.subscriber, "subscriber", "tcp://127.0.0.1:8989", "the interface we should be listening for events on")
 }
 
 func main() {
 	flag.Parse()
 	config := client.DefaultConfig()
-	config.Binding = options.endpoint
+	config.Binding = options.subscriber
 	config.Bridge = options.bridge
 	config.Logger = os.Stdout
 	log.SetLevel(log.DebugLevel)
@@ -49,7 +49,7 @@ func main() {
 
 	subscription := new(client.Subscription)
 	subscription.ID = "slow_client"
-	subscription.Endpoint = options.endpoint
+	subscription.Subscriber = options.subscriber
 	subscription.PreHook("/.*/containers/create")
 
 	requests := make(client.RequestsChannel, 10)

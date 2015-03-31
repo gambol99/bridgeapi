@@ -21,7 +21,6 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
-	"os"
 	"regexp"
 	"sync"
 	"time"
@@ -124,39 +123,44 @@ func (b *BridgeImpl) Remove(id string) error {
 //	request:	the content of the request
 func (b *BridgeImpl) PreHookEvent(uri string, request []byte) ([]byte, error) {
 	log.Infof("Bridge recieved a pre hook request, uri: %s", uri)
-	forwarders := b.getListeners(uri, client.PRE_EVENT)
-	if len(forwarders) <= 0 {
-		log.Infof("Found %d subscribers listening out for: %s", len(forwarders), uri)
+
+	// step: we get a list of subscribers that are hooked into this request
+	subscribers := b.getListeners(uri, client.PRE_EVENT)
+	log.Infof("Found %d subscribers listening out for: %s", len(subscribers), uri)
+	if len(subscribers) <= 0 {
 		return request, nil
 	}
+
 	// step: we call each of the subscribers in turn
-	api_request := new(client.APIRequest)
-	api_request.ID, _ = os.Hostname()
-	api_request.Stamp = time.Now()
-	api_request.HookType = client.PRE_EVENT
-	api_request.Request = string(request)
-	api_request.URI = uri
+	payload := &client.APIRequest {
+		ID: "bridge",
+		Stamp: time.Now(),
+		HookType: client.PRE_EVENT,
+		Request: string(request),
+		URI: uri,
+	}
 
-	for _, l := range forwarders {
+	// step: we iterate the subscribers and forward on the request
+	for _, l := range subscribers {
+		log.Debugf("Forwarding the request uri: %s to subscriber: %s", uri, l.Subscriber)
 
-		log.Debugf("Forwarding the request uri: %s to subscriber: %s", uri, l.Endpoint)
 		// step: forward the request on to the subscriber
-		response, err := b.performHTTP("POST", l.Endpoint, request)
+		response, err := b.performHTTP("POST", l.Subscriber, request)
 		if err != nil {
-			log.Errorf("Failed to call the subscriber: %s, error: %s", l.Endpoint, err)
+			log.Errorf("Failed to call the subscriber: %s, error: %s", l.Subscriber, err)
 			continue
 		}
 
 		// step: decode the result
-		err = json.NewDecoder(strings.NewReader(string(response))).Decode(api_request)
+		err = json.NewDecoder(strings.NewReader(string(response))).Decode(payload)
 		if err != nil {
-			log.Errorf("Failed to decode the response from subscriber: %s, error: %s", l.Endpoint, err)
+			log.Errorf("Failed to decode the response from subscriber: %s, error: %s", l.Subscriber, err)
 			continue
 		}
 
-		log.Debugf("Response from subscribe: %V", api_request)
+		log.Debugf("Response from subscribe: %V", payload)
 
-		request = []byte(api_request.Request)
+		request = []byte(payload.Request)
 	}
 	return request, nil
 }

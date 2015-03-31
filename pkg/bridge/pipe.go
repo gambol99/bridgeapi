@@ -27,10 +27,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/justinas/alice"
-	"github.com/gorilla/context"
 	log "github.com/Sirupsen/logrus"
+	"github.com/gorilla/context"
 	"github.com/gorilla/mux"
+	"github.com/justinas/alice"
 )
 
 func NewPipe(source, sink *url.URL, bridge Bridge) (Pipe, error) {

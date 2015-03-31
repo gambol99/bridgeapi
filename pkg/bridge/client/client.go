@@ -27,10 +27,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/justinas/alice"
 	log "github.com/Sirupsen/logrus"
 	"github.com/gorilla/mux"
-
+	"github.com/justinas/alice"
 )
 
 // the implementation of the client
@@ -229,7 +228,7 @@ func (r *ClientImpl) requestHandler(writer http.ResponseWriter, request *http.Re
 // Send a json request to the bridge, get and decode the response
 //	uri:		the uri on the bridge to target
 //  result:		the data structure we should decode into
-func (r *ClientImpl) send(method, uri string, data, result interface {}) (int, error) {
+func (r *ClientImpl) send(method, uri string, data, result interface{}) (int, error) {
 	log.Debugf("Sending the request to bridge: %V", data)
 
 	// step: encode the post data
@@ -284,10 +283,9 @@ func (r *ClientImpl) send(method, uri string, data, result interface {}) (int, e
 	return response.StatusCode, nil
 }
 
-func (r *ClientImpl) dialHost() (string) {
+func (r *ClientImpl) dialHost() string {
 	if r.bridge.Scheme == "unix" {
 		return fmt.Sprintf("/%s%s", r.bridge.Host, r.bridge.Path)
 	}
 	return r.bridge.Host
 }
-
