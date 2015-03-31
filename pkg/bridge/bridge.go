@@ -29,7 +29,6 @@ import (
 
 	log "github.com/Sirupsen/logrus"
 
-
 	"bytes"
 	"encoding/json"
 	"strings"
@@ -120,6 +119,7 @@ func (b *BridgeImpl) Remove(id string) error {
 // Called on a prehook event, i.e. when a client *first* makes a request to the API, but *before*
 // its been forwarded to the sink
 //  uri:		the uri of the resource
+//  query:      the query string if any
 //	request:	the content of the request
 func (b *BridgeImpl) PreHookEvent(uri string, request []byte) ([]byte, error) {
 	log.Infof("Bridge recieved a pre hook request, uri: %s", uri)
@@ -132,12 +132,13 @@ func (b *BridgeImpl) PreHookEvent(uri string, request []byte) ([]byte, error) {
 	}
 
 	// step: we call each of the subscribers in turn
-	payload := &client.APIRequest {
-		ID: "bridge",
-		Stamp: time.Now(),
+	payload := &client.Event{
+		ID:       "bridge",
+		Stamp:    time.Now(),
 		HookType: client.PRE_EVENT,
-		Request: string(request),
-		URI: uri,
+		URI:      uri,
+		Query:    "",
+		Request:  string(request),
 	}
 
 	// step: we iterate the subscribers and forward on the request
@@ -230,7 +231,7 @@ func (b *BridgeImpl) performHTTP(method, endpoint string, data []byte) ([]byte, 
 	return content, nil
 }
 
-func (r *BridgeImpl) dialHost(host *url.URL) (string) {
+func (r *BridgeImpl) dialHost(host *url.URL) string {
 	if host.Scheme == "unix" {
 		return fmt.Sprintf("/%s%s", host.Host, host.Path)
 	}

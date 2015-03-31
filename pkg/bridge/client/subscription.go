@@ -19,15 +19,15 @@ import (
 	"strings"
 )
 
-func (r *Subscription) AddHook(h *APIHook) {
+func (r *Subscription) AddHook(h *Hook) {
 	if r.Requests == nil {
-		r.Requests = make([]*APIHook, 0)
+		r.Requests = make([]*Hook, 0)
 	}
 	r.Requests = append(r.Requests, h)
 }
 
 func (r *Subscription) PreHook(uri string) *Subscription {
-	hook := &APIHook{
+	hook := &Hook{
 		HookType: PRE_EVENT,
 		URI:      uri,
 	}
@@ -36,7 +36,7 @@ func (r *Subscription) PreHook(uri string) *Subscription {
 }
 
 func (r *Subscription) PostHook(uri string) *Subscription {
-	hook := &APIHook{
+	hook := &Hook{
 		HookType: POST_EVENT,
 		URI:      uri,
 	}
@@ -68,7 +68,7 @@ func (r Subscription) Valid() error {
 	return nil
 }
 
-func (r *APIHook) Valid() error {
+func (r *Hook) Valid() error {
 	if r.URI == "" {
 		return fmt.Errorf("the uri for the hook is empty")
 	}

@@ -22,7 +22,7 @@ import (
 	"strings"
 )
 
-func (r *ClientImpl) decodeAPIRequest(request *http.Request) (*APIRequest, error) {
+func (r *ClientImpl) decodeAPIRequest(request *http.Request) (*Event, error) {
 	// step: ensure we are dealing with json
 	if valid, err := r.isJsonContent(request); err != nil {
 		return nil, err
@@ -51,8 +51,8 @@ func (r *ClientImpl) isJsonContent(request *http.Request) (bool, error) {
 	return false, fmt.Errorf("Content-Type specified: %s must be 'application/json'", content_type)
 }
 
-func (r *ClientImpl) decodeRequest(content string) (*APIRequest, error) {
-	api_request := new(APIRequest)
+func (r *ClientImpl) decodeRequest(content string) (*Event, error) {
+	api_request := new(Event)
 	err := json.NewDecoder(strings.NewReader(content)).Decode(api_request)
 	if err != nil {
 		return nil, err
@@ -60,7 +60,7 @@ func (r *ClientImpl) decodeRequest(content string) (*APIRequest, error) {
 	return api_request, nil
 }
 
-func (r *ClientImpl) encodeAPIRequest(request *APIRequest) ([]byte, error) {
+func (r *ClientImpl) encodeAPIRequest(request *Event) ([]byte, error) {
 	var buf bytes.Buffer
 	err := json.NewEncoder(&buf).Encode(request)
 	if err != nil {

@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/gambol99/bridge.io/pkg/bridge/client"
+	"github.com/gambol99/bridge.io/pkg/bridge/utils"
 
 	log "github.com/Sirupsen/logrus"
 	"github.com/gorilla/mux"
@@ -78,13 +79,13 @@ func (r *BridgeAPI) loggingHandler(next http.Handler) http.Handler {
 func (r *BridgeAPI) pingHandler(writer http.ResponseWriter, request *http.Request) {
 	msg := new(client.MessageResponse)
 	msg.Message = "pong"
-	r.send(writer, request, msg)
+	r.send(writer, msg)
 }
 
 func (r *BridgeAPI) subscribeHandler(writer http.ResponseWriter, request *http.Request) {
 	// step: we grab and decode
 	subscription := new(client.Subscription)
-	if _, err := decodeByContent(request, subscription); err != nil {
+	if err := utils.HttpJsonDecode(request.Body, request.ContentLength, subscription); err != nil {
 		r.errorMessage(writer, request, "unable to decode the request, error: %s", err)
 		return
 	}
@@ -96,13 +97,13 @@ func (r *BridgeAPI) subscribeHandler(writer http.ResponseWriter, request *http.R
 		return
 	}
 	// step: compose the response
-	r.send(writer, request, &client.SubscriptionResponse{ID: id})
+	r.send(writer, &client.SubscriptionResponse{ID: id})
 }
 
 func (r *BridgeAPI) subscriptionsHandler(writer http.ResponseWriter, request *http.Request) {
 	response := new(client.SubscriptionsResponse)
 	//response.Subscriptions = r.bridge.Subscriptions()
-	r.send(writer, request, response)
+	r.send(writer, response)
 }
 
 func (r *BridgeAPI) unsubscribeHandler(writer http.ResponseWriter, request *http.Request) {
@@ -118,18 +119,18 @@ func (r *BridgeAPI) errorMessage(writer http.ResponseWriter, request *http.Reque
 	msg := &client.MessageResponse{
 		Message: fmt.Sprintf(message, args...),
 	}
-	return r.send(writer, request, msg)
+	return r.send(writer, msg)
 }
 
 // Send a response back the client
-func (r *BridgeAPI) send(writer http.ResponseWriter, request *http.Request, data interface{}) error {
-	// encode to the appropriate content type
-	content, content_type, err := encodeByContent(request, data)
+func (r *BridgeAPI) send(writer http.ResponseWriter, data interface{}) error {
+	//method, location string, payload, result interface{}, timeout time.Duration)
+	content, err := utils.JsonEncode(data)
 	if err != nil {
 		log.Debugf("Failed to encode the request data, error: %s", err)
 		return err
 	}
-	writer.Header().Set("Content-Type", content_type)
+	writer.Header().Set("Content-Type", "application/json")
 	writer.WriteHeader(200)
 	writer.Write(content)
 	return nil

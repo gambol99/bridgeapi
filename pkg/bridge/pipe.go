@@ -16,8 +16,6 @@ package bridge
 import (
 	"bytes"
 	"fmt"
-	"io"
-	"io/ioutil"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -26,6 +24,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/gambol99/bridge.io/pkg/bridge/utils"
 
 	log "github.com/Sirupsen/logrus"
 	"github.com/gorilla/context"
@@ -122,7 +122,7 @@ func (pipe *PipeImpl) loggingHandler(next http.Handler) http.Handler {
 func (pipe *PipeImpl) preSinkRequestHandler(next http.Handler) http.Handler {
 	fn := func(w http.ResponseWriter, request *http.Request) {
 		// generate the url and read in the original content
-		content, err := pipe.extractRequestBody(request)
+		content, err := utils.ReadHttpContentBody(request.Body, request.ContentLength)
 		if err != nil {
 			log.Panicf("failed to read in the request body from the original request, error: %s", err)
 		}
@@ -140,6 +140,10 @@ func (pipe *PipeImpl) preSinkRequestHandler(next http.Handler) http.Handler {
 	}
 	return http.HandlerFunc(fn)
 }
+
+var (
+	RequestHeaders = []string{"User-Agent", "Content-Type", "Accept", "Host", "Upgrade"}
+)
 
 // The handler is responsible for processing the response from the sink and forwarding
 // to anyone that is
@@ -167,8 +171,7 @@ func (pipe *PipeImpl) postSinkRequestHandler(next http.Handler) http.Handler {
 			}
 
 			// add the headers to the forwarded request
-			headers := []string{"User-Agent", "Content-Type", "Accept", "Host", "Upgrade"}
-			for _, header := range headers {
+			for _, header := range RequestHeaders {
 				if request.Header.Get(header) != "" {
 					forwarded.Header.Add(header, request.Header.Get(header))
 				}
@@ -180,7 +183,7 @@ func (pipe *PipeImpl) postSinkRequestHandler(next http.Handler) http.Handler {
 				log.Panicf("failed to forward the request on the sink, error: %s", err)
 			}
 
-			content, err := pipe.extractResponseBody(response)
+			content, err := utils.ReadHttpContentBody(response.Body, response.ContentLength)
 			if err != nil {
 				log.Panicf("failed to read in the content from the sink response, error: %s", err)
 			}
@@ -195,7 +198,7 @@ func (pipe *PipeImpl) postSinkRequestHandler(next http.Handler) http.Handler {
 			}
 
 			// write the content back to the client
-			for _, header := range headers {
+			for _, header := range RequestHeaders {
 				if response.Header.Get(header) != "" {
 					w.Header().Add(header, response.Header.Get(header))
 				}
@@ -215,6 +218,10 @@ func (pipe *PipeImpl) postSinkRequestHandler(next http.Handler) http.Handler {
 		}
 	}
 	return http.HandlerFunc(fn)
+}
+
+func (pipe *PipeImpl) finalHandler(w http.ResponseWriter, request *http.Request) {
+
 }
 
 func (pipe *PipeImpl) hijack(w http.ResponseWriter, request *http.Request) error {
@@ -273,49 +280,11 @@ func (pipe *PipeImpl) hijack(w http.ResponseWriter, request *http.Request) error
 
 	var wg sync.WaitGroup
 	wg.Add(2)
-	go pipe.tranferBytes(sink_conn, conn, &wg)
-	go pipe.tranferBytes(conn, sink_conn, &wg)
+	go utils.TransferBytes(sink_conn, conn, &wg)
+	go utils.TransferBytes(conn, sink_conn, &wg)
 	wg.Wait()
 
 	return nil
-}
-
-// The is effectivily a noop, perhaps using it for an audit trail
-func (pipe *PipeImpl) finalHandler(w http.ResponseWriter, r *http.Request) {
-
-}
-
-func (pipe *PipeImpl) extractRequestBody(request *http.Request) ([]byte, error) {
-	if request.ContentLength > 0 || request.ContentLength < 0 {
-		content, err := ioutil.ReadAll(request.Body)
-		if err != nil {
-			return []byte{}, err
-		}
-		return content, nil
-	}
-	return []byte{}, nil
-}
-
-func (pipe *PipeImpl) extractResponseBody(response *http.Response) ([]byte, error) {
-	if response.ContentLength > 0 || response.ContentLength < 0 {
-		content, err := ioutil.ReadAll(response.Body)
-		if err != nil {
-			return []byte{}, err
-		}
-		return content, nil
-	}
-	return []byte{}, nil
-}
-
-func (pipe *PipeImpl) tranferBytes(src io.Reader, dest io.Writer, wg *sync.WaitGroup) {
-	defer wg.Done()
-	copied, err := io.Copy(dest, src)
-	if err != nil {
-		log.Errorf("Failed to copy from hijacked connections, error: %s", err)
-	}
-	src.(net.Conn).Close()
-	dest.(net.Conn).Close()
-	log.Infof("Copied %d bytes on hijacked connections", copied)
 }
 
 func (pipe *PipeImpl) parseForwardingURL(request *http.Request) string {

@@ -27,10 +27,10 @@ var options struct {
 	bridge string
 	// the interface we should listen on
 	subscriber string
-	}
+}
 
 func init() {
- 	flag.StringVar(&options.bridge, "bridge", "unix://var/run/docker.sock", "the endpoint of the bridge")
+	flag.StringVar(&options.bridge, "bridge", "unix://var/run/docker.sock", "the endpoint of the bridge")
 	flag.StringVar(&options.subscriber, "subscriber", "tcp://127.0.0.1:8989", "the interface we should be listening for events on")
 }
 
@@ -62,6 +62,6 @@ func main() {
 
 	for request := range requests {
 		log.Infof("Recieved a forwarded request for uei: %s, payload: %s", request.URI, request.Request)
-		request.Response <- request
+		request.Respond()
 	}
 }

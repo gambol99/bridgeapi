@@ -15,6 +15,7 @@ package client
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"time"
 )
@@ -59,22 +60,33 @@ type Client interface {
 }
 
 // a channel for the below
-type RequestsChannel chan *APIRequest
+type RequestsChannel chan *Event
 
 // A structure to define and incoming request
-type APIRequest struct {
+type Event struct {
 	// an id for the origin - normally the hostname
 	ID string `json:"id"`
 	// a timestamp for the request
 	Stamp time.Time `json:"timestamp"`
-	// the uri for the request
-	URI string `json:"uri"`
 	// the hook type
 	HookType string `json:"type"`
+	// the uri for the request
+	URI string `json:"uri"`
+	// the query string
+	Query string `json:"query"`
 	// the payload itself
 	Request string `json:"request"`
 	// the channel to send the response on
-	Response RequestsChannel
+	response RequestsChannel
+}
+
+func (r Event) String() string {
+	return fmt.Sprintf("time: %s, uri: %s, request: %s",
+		r.Stamp, r.URI, r.Request)
+}
+
+func (r *Event) Respond() {
+	r.response <- r
 }
 
 // A registration request structure: used buy the client register for hook events
@@ -86,11 +98,11 @@ type Subscription struct {
 	// the endpoint to send these requests
 	Subscriber string `json:"subscriber"`
 	// an array of hook requests
-	Requests []*APIHook `json:"hooks"`
+	Requests []*Hook `json:"hooks"`
 }
 
 // A Hook definition / request for access to the API
-type APIHook struct {
+type Hook struct {
 	// should this hook be enforcing, i.e. if were not able to contact you, kill the request
 	Enforcing bool `json:"enforcing"`
 	// when the hook should be fired, i.e. pre, post or both

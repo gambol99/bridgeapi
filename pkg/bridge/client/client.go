@@ -198,7 +198,7 @@ func (r *ClientImpl) requestHandler(writer http.ResponseWriter, request *http.Re
 	// step: we create a channel for sending the response back to the client and pass
 	// the reference in the api request struct. To ensure we don't end up with a plethora of
 	// these, we have a fail-safe timer
-	apirq.Response = make(RequestsChannel)
+	apirq.response = make(RequestsChannel)
 
 	go func() {
 		r.requests <- apirq
@@ -206,7 +206,7 @@ func (r *ClientImpl) requestHandler(writer http.ResponseWriter, request *http.Re
 
 	// step: wait for a response from the consumer and reply back to the client
 	select {
-	case response := <-apirq.Response:
+	case response := <-apirq.response:
 		log.Debugf("Recieved the response from client, sending back the response")
 
 		// step: we encode the api request
