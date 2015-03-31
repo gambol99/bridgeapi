@@ -22,20 +22,7 @@ import (
 	"strings"
 )
 
-func (r *ClientImpl) isJsonContent(request *http.Request) (bool, error) {
-	content_type := request.Header.Get("Content-Type")
-	if content_type == "" {
-		if request.Body == nil || request.ContentLength == 0 {
-			return false, nil
-		}
-	}
-	if content_type == "application/json" {
-		return true, nil
-	}
-	return false, fmt.Errorf("Content-Type specified: %s must be 'application/json'", content_type)
-}
-
-func (r *ClientImpl) decodeHttpRequest(request *http.Request) (*APIRequest, error) {
+func (r *ClientImpl) decodeAPIRequest(request *http.Request) (*APIRequest, error) {
 	// step: ensure we are dealing with json
 	if valid, err := r.isJsonContent(request); err != nil {
 		return nil, err
@@ -51,6 +38,19 @@ func (r *ClientImpl) decodeHttpRequest(request *http.Request) (*APIRequest, erro
 	return r.decodeRequest(string(content))
 }
 
+func (r *ClientImpl) isJsonContent(request *http.Request) (bool, error) {
+	content_type := request.Header.Get("Content-Type")
+	if content_type == "" {
+		if request.Body == nil || request.ContentLength == 0 {
+			return false, nil
+		}
+	}
+	if content_type == "application/json" {
+		return true, nil
+	}
+	return false, fmt.Errorf("Content-Type specified: %s must be 'application/json'", content_type)
+}
+
 func (r *ClientImpl) decodeRequest(content string) (*APIRequest, error) {
 	api_request := new(APIRequest)
 	err := json.NewDecoder(strings.NewReader(content)).Decode(api_request)
@@ -60,7 +60,7 @@ func (r *ClientImpl) decodeRequest(content string) (*APIRequest, error) {
 	return api_request, nil
 }
 
-func (r *ClientImpl) encodeRequest(request *APIRequest) ([]byte, error) {
+func (r *ClientImpl) encodeAPIRequest(request *APIRequest) ([]byte, error) {
 	var buf bytes.Buffer
 	err := json.NewEncoder(&buf).Encode(request)
 	if err != nil {

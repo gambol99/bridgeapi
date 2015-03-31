@@ -28,8 +28,8 @@ import (
 	"time"
 
 	"github.com/justinas/alice"
-	"github.com/gorilla/mux"
 	log "github.com/Sirupsen/logrus"
+	"github.com/gorilla/mux"
 
 )
 
@@ -51,31 +51,8 @@ type ClientImpl struct {
 	listener net.Listener
 	// the router for the http service
 	router *mux.Router
-}
-
-// Create a new client to communicate with the bridge
-//	config:		 	the configuration to use with the client
-func NewClient(cfg *Config) (Client, error) {
-	var err error
-	if cfg == nil {
-		return nil, errors.New("you have not specified any configuration")
-	}
-	// step: parse the url
-	client := new(ClientImpl)
-	client.bridge, err = url.Parse(cfg.Bridge)
-	if err != nil {
-		return nil, ErrInvalidBridge
-	}
-	client.client = &http.Client{}
-	client.requests = make(RequestsChannel, 10)
-	client.config = cfg
-
-	// step: start listening to requests from the
-	err = client.setupHttpService(client)
-	if err != nil {
-		return nil, err
-	}
-	return client, nil
+	// a list of our subscriptions
+	subscriptions []string
 }
 
 func DefaultConfig() *Config {
@@ -87,10 +64,34 @@ func DefaultConfig() *Config {
 	}
 }
 
+// Create a new client to communicate with the bridge
+//	config:		 	the configuration to use with the client
+func NewClient(cfg *Config) (Client, error) {
+	var err error
+	if cfg == nil {
+		return nil, errors.New("you have not specified any configuration")
+	}
+	client := new(ClientImpl)
+	if client.bridge, err = url.Parse(cfg.Bridge); err != nil {
+		return nil, fmt.Errorf("Invalid bridge specified: %s", cfg.Bridge)
+	}
+	client.client = &http.Client{}
+	client.requests = make(RequestsChannel, 10)
+	client.config = cfg
+	client.subscriptions = make([]string, 0)
+	if err := client.setupHttpService(client); err != nil {
+		return nil, fmt.Errorf("Failed to create the http service, error: %s", err)
+	}
+	return client, nil
+}
+
 // Request to close off any resources, disconnect our self as an endpoint (if required)
 // and close the client
 func (r *ClientImpl) Close() error {
-
+	for _, id := range r.subscriptions {
+		log.Debugf("Unsubscribing subscription: %s", id)
+		r.Unsubscribe(id)
+	}
 	return nil
 }
 
@@ -98,9 +99,12 @@ func (r *ClientImpl) Close() error {
 // 	register:		the registration structure containing the hooks
 //  channel:		the channel you want to receive the api requests on
 func (r *ClientImpl) Subscribe(register *Subscription, channel RequestsChannel) (string, error) {
+	// step: validate the subscription
 	if err := register.Valid(); err != nil {
 		return "", err
 	}
+
+	// step: register the subscription
 	r.requests = channel
 	response := new(SubscriptionResponse)
 	code, err := r.send("POST", API_SUBSCRIPTION, register, response)
@@ -110,16 +114,20 @@ func (r *ClientImpl) Subscribe(register *Subscription, channel RequestsChannel) 
 	if code != 200 {
 		return "", fmt.Errorf("status: %d", code)
 	}
+
+	// step: we add to the list
+	r.subscriptions = append(r.subscriptions, response.ID)
+
 	return response.ID, nil
 }
 
 // Unregister from the bridge.io service
 // 	id:				the registration id which was given when you registered
 func (r *ClientImpl) Unsubscribe(id string) error {
-	uri := fmt.Sprintf("%s/%s", API_SUBSCRIPTION, id)
-	code, err := r.send("DELETE", uri, nil, nil)
+	code, err := r.send("DELETE", fmt.Sprintf("%s/%s", API_SUBSCRIPTION, id), nil, nil)
 	if err != nil {
-		return err
+		log.Debugf("Failed to unsubscribe from the bridge, error: %s", err)
+		return fmt.Errorf("unable to unsubscribe id: %s, error: %s", id, err)
 	}
 	if code != 200 {
 		return fmt.Errorf("failed to unsubscribe the id: %s", id)
@@ -131,17 +139,17 @@ func (r *ClientImpl) Unsubscribe(id string) error {
 // 	client:			the Client implementation reference
 func (r *ClientImpl) setupHttpService(client *ClientImpl) error {
 	var err error
-
+	// step: parse the binding
 	client.server_url, err = url.Parse(client.config.Binding)
 	if err != nil {
 		return errors.New(fmt.Sprintf("invalid http binding, error: %s", err))
 	}
-	log.Debugf("Parsing the clinet binding address: %s:%s", client.server_url.Scheme, client.server_url.Host)
+	log.Debugf("Parsing the client binding address: %s:%s", client.server_url.Scheme, client.server_url.Host)
 
 	// step: create a listener for the interface
 	client.listener, err = net.Listen(client.server_url.Scheme, client.server_url.Host)
 	if err != nil {
-		return errors.New(fmt.Sprintf("failed to create the listener, error: %s", err))
+		return errors.New(fmt.Sprintf("unable to create the listener, error: %s", err))
 	}
 
 	// step: setup the routing
@@ -159,12 +167,8 @@ func (r *ClientImpl) setupHttpService(client *ClientImpl) error {
 		MaxHeaderBytes: 1 << 20,
 	}
 
-	log.Debugf("client server: %v", client.server)
-	log.Debugf("client listener: %v", client.listener)
-
 	// step: start listening
 	go client.server.Serve(client.listener)
-	log.Debugf("Created the client listener service")
 	return nil
 }
 
@@ -182,41 +186,43 @@ func (pipe *ClientImpl) recoveryHandler(next http.Handler) http.Handler {
 
 func (r *ClientImpl) requestHandler(writer http.ResponseWriter, request *http.Request) {
 	log.Debugf("Recieved request from: %s", request.RemoteAddr)
+
 	// step: we parse and decode the request and send on the channel
-	req, err := r.decodeHttpRequest(request)
+	apirq, err := r.decodeAPIRequest(request)
 	if err != nil {
 		log.Debugf("Failed to decode the request from: %s, error: %s", request.RemoteAddr, err)
 		return
 	}
 
-	log.Debugf("Request from: %s, content: %s", request.RemoteAddr, req)
+	log.Debugf("Request from: %s, content: %s", request.RemoteAddr, apirq)
 
 	// step: we create a channel for sending the response back to the client and pass
-	// the reference in the api request struct. To ensure we don't end up with a plethoraa of
+	// the reference in the api request struct. To ensure we don't end up with a plethora of
 	// these, we have a fail-safe timer
-	req.Response = make(RequestsChannel)
+	apirq.Response = make(RequestsChannel)
 
 	go func() {
-		r.requests <- req
+		r.requests <- apirq
 	}()
 
 	// step: wait for a response from the consumer and reply back to the client
 	select {
-	case response := <-req.Response:
+	case response := <-apirq.Response:
 		log.Debugf("Recieved the response from client, sending back the response")
-		// step: we encode the response
-		content, err := r.encodeRequest(response)
-		if err != nil {
-			return
+
+		// step: we encode the api request
+		var content bytes.Buffer
+		if err := json.NewEncoder(&content).Encode(response); err != nil {
+			panic("failed to encode the api request")
 		}
+
+		// step: send the content back
 		writer.Header().Set("Content-Type", "application/json")
 		writer.WriteHeader(200)
-		writer.Write(content)
+		writer.Write(content.Bytes())
 
 	case <-time.After(r.config.MaxTime):
-		log.Debugf("We have timed out waiting for a response from the client")
-		writer.WriteHeader(500)
-		writer.Write([]byte("timeout"))
+		panic("we have timed out wait for the client to process the request")
 	}
 }
 
@@ -224,11 +230,12 @@ func (r *ClientImpl) requestHandler(writer http.ResponseWriter, request *http.Re
 //	uri:		the uri on the bridge to target
 //  result:		the data structure we should decode into
 func (r *ClientImpl) send(method, uri string, data, result interface {}) (int, error) {
+	log.Debugf("Sending the request to bridge: %V", data)
+
 	// step: encode the post data
 	var buffer bytes.Buffer
 	if data != nil {
-		err := json.NewEncoder(&buffer).Encode(data)
-		if err != nil {
+		if err := json.NewEncoder(&buffer).Encode(data); err != nil {
 			return 0, fmt.Errorf("Failed to encode the data for request, error: %s", err)
 		}
 	}
@@ -236,13 +243,13 @@ func (r *ClientImpl) send(method, uri string, data, result interface {}) (int, e
 	// step: we compose the request
 	request, err := http.NewRequest(method, uri, &buffer)
 	if err != nil {
-		return 0, fmt.Errorf("Failed to compose the request to the bridge, error: %s", err)
+		return 0, fmt.Errorf("unable to compose the request to the bridge, error: %s", err)
 	}
 
 	// step: we compose the dialing to the bridge endpoint
 	dial, err := net.Dial(r.bridge.Scheme, r.dialHost())
 	if err != nil {
-		log.Debugf("Failed to dial the bridge, error: %s", err)
+		log.Debugf("unable to dial the bridge, error: %s", err)
 		return 0, err
 	}
 
@@ -253,7 +260,7 @@ func (r *ClientImpl) send(method, uri string, data, result interface {}) (int, e
 	// perform the request to api (sink)
 	response, err := http_client.Do(request)
 	if err != nil {
-		log.Debugf("Failed to post the request to bridge endpoint, error: %s", err)
+		log.Debugf("unable to post the request to bridge endpoint, error: %s", err)
 		return 0, fmt.Errorf("Failed to perform bridge request: %s, error: %s", uri, err)
 	}
 
