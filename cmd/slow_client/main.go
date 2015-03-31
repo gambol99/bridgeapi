@@ -40,6 +40,7 @@ func main() {
 	config.Binding = options.endpoint
 	config.Bridge = options.bridge
 	config.Logger = os.Stdout
+	log.SetLevel(log.DebugLevel)
 
 	c, err := client.NewClient(config)
 	if err != nil {
@@ -49,10 +50,7 @@ func main() {
 	subscription := new(client.Subscription)
 	subscription.ID = "slow_client"
 	subscription.Endpoint = options.endpoint
-	hook := new(client.APIHook)
-	hook.HookType = client.PRE_EVENT
-	hook.URI = "/*/container/start"
-	subscription.Add(hook)
+	subscription.PreHook("/.*/containers/create")
 
 	requests := make(client.RequestsChannel, 10)
 

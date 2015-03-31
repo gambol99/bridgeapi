@@ -22,15 +22,15 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"os"
+	"strings"
 	"sync"
 	"time"
 
-	log "github.com/Sirupsen/logrus"
-	"github.com/gorilla/context"
-	"github.com/gorilla/mux"
 	"github.com/justinas/alice"
-	"os"
-	"strings"
+	"github.com/gorilla/context"
+	log "github.com/Sirupsen/logrus"
+	"github.com/gorilla/mux"
 )
 
 func NewPipe(source, sink *url.URL, bridge Bridge) (Pipe, error) {
@@ -52,7 +52,7 @@ func NewPipe(source, sink *url.URL, bridge Bridge) (Pipe, error) {
 
 	log.Infof("Creating the source socket: %s:%s", source.Scheme, source_socket)
 
-	// create the socker for the http service
+	// create the listener for the http service
 	if pipe.listener, err = net.Listen(source.Scheme, source_socket); err != nil {
 		log.Errorf("Failed to create the socket, error: %s", err)
 		return nil, err
@@ -128,12 +128,13 @@ func (pipe *PipeImpl) preSinkRequestHandler(next http.Handler) http.Handler {
 		}
 
 		// BRIDGE PRE HOOK CALL
-		if content, err = pipe.bridge.PreHookEvent(request.RequestURI, content); err != nil {
+		if content, err = pipe.bridge.PreHookEvent(request.URL.RequestURI(), content); err != nil {
 			log.Errorf("Failed to call the bridge pre hook, error: %s", err)
 		}
 
 		// we inject the mutated response into the context
 		context.Set(request, SESSION_REQUEST, content)
+
 		// move on to the next level
 		next.ServeHTTP(w, request)
 	}

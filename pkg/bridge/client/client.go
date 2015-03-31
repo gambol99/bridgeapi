@@ -21,12 +21,16 @@ import (
 	"io/ioutil"
 	"net"
 	"net/http"
+	"net/http/httputil"
 	"net/url"
 	"os"
 	"strings"
 	"time"
 
+	"github.com/justinas/alice"
 	"github.com/gorilla/mux"
+	log "github.com/Sirupsen/logrus"
+
 )
 
 // the implementation of the client
@@ -71,8 +75,7 @@ func NewClient(cfg *Config) (Client, error) {
 	if err != nil {
 		return nil, err
 	}
-
-	return nil, nil
+	return client, nil
 }
 
 func DefaultConfig() *Config {
@@ -100,9 +103,12 @@ func (r *ClientImpl) Subscribe(register *Subscription, channel RequestsChannel) 
 	}
 	r.requests = channel
 	response := new(SubscriptionResponse)
-	_, err := r.send("POST", API_SUBSCRIPTION, register, response)
+	code, err := r.send("POST", API_SUBSCRIPTION, register, response)
 	if err != nil {
 		return "", err
+	}
+	if code != 200 {
+		return "", fmt.Errorf("status: %d", code)
 	}
 	return response.ID, nil
 }
@@ -130,59 +136,88 @@ func (r *ClientImpl) setupHttpService(client *ClientImpl) error {
 	if err != nil {
 		return errors.New(fmt.Sprintf("invalid http binding, error: %s", err))
 	}
-
-	// step: setup the routing
-	client.router = mux.NewRouter()
-	client.router.HandleFunc(client.server_url.RequestURI(), client.handleRequest).Methods("POST")
-
-	// step: create the http server
-	client.server = &http.Server{
-		Addr:           client.config.Binding,
-		Handler:        client.router,
-		MaxHeaderBytes: 1 << 20,
-	}
-	client.server.SetKeepAlivesEnabled(true)
+	log.Debugf("Parsing the clinet binding address: %s:%s", client.server_url.Scheme, client.server_url.Host)
 
 	// step: create a listener for the interface
 	client.listener, err = net.Listen(client.server_url.Scheme, client.server_url.Host)
 	if err != nil {
 		return errors.New(fmt.Sprintf("failed to create the listener, error: %s", err))
 	}
-	// step: start listening
-	go func() {
-		client.server.ListenAndServe()
-	}()
 
+	// step: setup the routing
+	log.Debugf("Creating the router for the client listener service")
+	middleware := alice.New(client.recoveryHandler).ThenFunc(client.requestHandler)
+	router := mux.NewRouter()
+	router.Handle("/", middleware)
+	client.router = router
+
+	// step: create the http server
+	client.server = &http.Server{
+		Handler:        router,
+		ReadTimeout:    time.Duration(120) * time.Second,
+		WriteTimeout:   time.Duration(120) * time.Second,
+		MaxHeaderBytes: 1 << 20,
+	}
+
+	log.Debugf("client server: %v", client.server)
+	log.Debugf("client listener: %v", client.listener)
+
+	// step: start listening
+	go client.server.Serve(client.listener)
+	log.Debugf("Created the client listener service")
 	return nil
 }
 
-func (r *ClientImpl) handleRequest(writer http.ResponseWriter, request *http.Request) {
+func (pipe *ClientImpl) recoveryHandler(next http.Handler) http.Handler {
+	fn := func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			if err := recover(); err != nil {
+				http.Error(w, http.StatusText(500), 500)
+			}
+		}()
+		next.ServeHTTP(w, r)
+	}
+	return http.HandlerFunc(fn)
+}
+
+func (r *ClientImpl) requestHandler(writer http.ResponseWriter, request *http.Request) {
+	log.Debugf("Recieved request from: %s", request.RemoteAddr)
 	// step: we parse and decode the request and send on the channel
 	req, err := r.decodeHttpRequest(request)
 	if err != nil {
+		log.Debugf("Failed to decode the request from: %s, error: %s", request.RemoteAddr, err)
 		return
 	}
+
+	log.Debugf("Request from: %s, content: %s", request.RemoteAddr, req)
+
 	// step: we create a channel for sending the response back to the client and pass
-	// the reference in the api request struct. To ensure we don't end up with aplethoraa of
+	// the reference in the api request struct. To ensure we don't end up with a plethoraa of
 	// these, we have a fail-safe timer
 	req.Response = make(RequestsChannel)
+
+	go func() {
+		r.requests <- req
+	}()
+
 	// step: wait for a response from the consumer and reply back to the client
-	go func(w http.ResponseWriter, rq *http.Request) {
-		select {
-		case response := <-req.Response:
-			// step: we encode the response
-			content, err := r.encodeRequest(response)
-			if err != nil {
-				return
-			}
-
-			w.WriteHeader(200)
-			w.Write(content)
-
-		case <-time.After(r.config.MaxTime):
-			w.Write([]byte("timeout"))
+	select {
+	case response := <-req.Response:
+		log.Debugf("Recieved the response from client, sending back the response")
+		// step: we encode the response
+		content, err := r.encodeRequest(response)
+		if err != nil {
+			return
 		}
-	}(writer, request)
+		writer.Header().Set("Content-Type", "application/json")
+		writer.WriteHeader(200)
+		writer.Write(content)
+
+	case <-time.After(r.config.MaxTime):
+		log.Debugf("We have timed out waiting for a response from the client")
+		writer.WriteHeader(500)
+		writer.Write([]byte("timeout"))
+	}
 }
 
 // Send a json request to the bridge, get and decode the response
@@ -204,23 +239,48 @@ func (r *ClientImpl) send(method, uri string, data, result interface {}) (int, e
 		return 0, fmt.Errorf("Failed to compose the request to the bridge, error: %s", err)
 	}
 
-	// step: we perform the request
-	response, err := r.client.Do(request)
+	// step: we compose the dialing to the bridge endpoint
+	dial, err := net.Dial(r.bridge.Scheme, r.dialHost())
 	if err != nil {
-		return response.StatusCode, fmt.Errorf("Failed to perform bridge request: %s, error: %s", uri, err)
+		log.Debugf("Failed to dial the bridge, error: %s", err)
+		return 0, err
+	}
+
+	// step: we create a connection
+	http_client := httputil.NewClientConn(dial, nil)
+	defer http_client.Close()
+
+	// perform the request to api (sink)
+	response, err := http_client.Do(request)
+	if err != nil {
+		log.Debugf("Failed to post the request to bridge endpoint, error: %s", err)
+		return 0, fmt.Errorf("Failed to perform bridge request: %s, error: %s", uri, err)
 	}
 
 	// step: read in the response
-	content, err := ioutil.ReadAll(response.Body)
-	if err != nil {
-		return response.StatusCode, fmt.Errorf("Failed to read in the response body, error: %s", err)
-	}
+	if response.ContentLength > 0 || response.ContentLength < 0 {
+		if response.Header.Get("Content-Type") == "application/json" {
 
-	// step: decode the response
-	err = json.NewDecoder(strings.NewReader(string(content))).Decode(result)
-	if err != nil {
-		return response.StatusCode, fmt.Errorf("Failed to decode the response, error: %s", err)
+			content, err := ioutil.ReadAll(response.Body)
+			if err != nil {
+				return response.StatusCode, fmt.Errorf("Failed to read in the response body, error: %s", err)
+			}
+
+			// step: decode the response
+			err = json.NewDecoder(strings.NewReader(string(content))).Decode(result)
+			if err != nil {
+				log.Debugf("Failed to decode json response: %s", string(content))
+				return response.StatusCode, fmt.Errorf("Failed to decode the response, error: %s", err)
+			}
+		}
 	}
 	return response.StatusCode, nil
+}
+
+func (r *ClientImpl) dialHost() (string) {
+	if r.bridge.Scheme == "unix" {
+		return fmt.Sprintf("/%s%s", r.bridge.Host, r.bridge.Path)
+	}
+	return r.bridge.Host
 }
 

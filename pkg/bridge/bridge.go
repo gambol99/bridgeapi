@@ -14,11 +14,13 @@ limitations under the License.
 package bridge
 
 import (
-	"bytes"
 	"fmt"
 	"io/ioutil"
 	"math/rand"
+	"net"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"os"
 	"regexp"
 	"sync"
@@ -27,6 +29,11 @@ import (
 	"github.com/gambol99/bridge.io/pkg/bridge/client"
 
 	log "github.com/Sirupsen/logrus"
+
+
+	"bytes"
+	"encoding/json"
+	"strings"
 )
 
 const (
@@ -130,30 +137,27 @@ func (b *BridgeImpl) PreHookEvent(uri string, request []byte) ([]byte, error) {
 	api_request.Request = string(request)
 	api_request.URI = uri
 
-	for _, listener := range forwarders {
-		log.Debugf("Forwarding the request uri: %s to subscriber: %s", uri, listener.Endpoint)
-		rq, err := http.NewRequest("POST", listener.Endpoint, bytes.NewBuffer(request))
+	for _, l := range forwarders {
+
+		log.Debugf("Forwarding the request uri: %s to subscriber: %s", uri, l.Endpoint)
+		// step: forward the request on to the subscriber
+		response, err := b.performHTTP("POST", l.Endpoint, request)
 		if err != nil {
-			log.Errorf("Failed to construct a request for endpoint: %s, error: %s", listener.Endpoint, err)
-			continue
-		}
-		// step: perform the request
-		response, err := b.client.Do(rq)
-		if err != nil {
-			log.Errorf("Failed to call the subscriber: %s, error: %s", listener.Endpoint, err)
-			continue
-		}
-		// step: read in the response from the client
-		content, err := ioutil.ReadAll(response.Body)
-		if err != nil {
-			log.Errorf("Failed to read the response boxy from subscriber: %s, error: %s", listener.Endpoint, err)
+			log.Errorf("Failed to call the subscriber: %s, error: %s", l.Endpoint, err)
 			continue
 		}
 
-		request = content
+		// step: decode the result
+		err = json.NewDecoder(strings.NewReader(string(response))).Decode(api_request)
+		if err != nil {
+			log.Errorf("Failed to decode the response from subscriber: %s, error: %s", l.Endpoint, err)
+			continue
+		}
 
+		log.Debugf("Response from subscribe: %V", api_request)
+
+		request = []byte(api_request.Request)
 	}
-
 	return request, nil
 }
 
@@ -176,6 +180,57 @@ func (b *BridgeImpl) Subscriptions() []*client.Subscription {
 	b.RLock()
 	defer b.RUnlock()
 	return b.subscriptions
+}
+
+func (b *BridgeImpl) performHTTP(method, endpoint string, data []byte) ([]byte, error) {
+
+	// step: parse the endpoint
+	u, err := url.Parse(endpoint)
+	if err != nil {
+		log.Errorf("Failed to parse the subscription endpoint, error: %s", err)
+		return []byte{}, err
+	}
+
+	// step: we compose the request
+	request, err := http.NewRequest(method, "/", bytes.NewReader(data))
+	if err != nil {
+		return []byte{}, fmt.Errorf("Failed to compose the request to the bridge, error: %s", err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+
+	// step: create the dialing client
+	log.Debugf("Dialing the subscriber: %s:%s", u.Scheme, b.dialHost(u))
+	dial, err := net.Dial(u.Scheme, b.dialHost(u))
+	if err != nil {
+		log.Debugf("Failed to dial the bridge, error: %s", err)
+		return []byte{}, err
+	}
+
+	http_client := httputil.NewClientConn(dial, nil)
+	defer http_client.Close()
+
+	// perform the request to api (sink)
+	log.Debugf("Performing the request on subscriber: %s", endpoint)
+	response, err := http_client.Do(request)
+	if err != nil {
+		return []byte{}, fmt.Errorf("Failed to perform request to endpoint: %s, error: %s", endpoint, err)
+	}
+
+	// step: read in the response from the client
+	content, err := ioutil.ReadAll(response.Body)
+	if err != nil {
+		log.Errorf("Failed to read the response boxy from subscriber: %s, error: %s", endpoint, err)
+		return []byte{}, fmt.Errorf("Failed to readin the request body from endpoint: %s, error: %s", endpoint, err)
+	}
+
+	return content, nil
+}
+
+func (r *BridgeImpl) dialHost(host *url.URL) (string) {
+	if host.Scheme == "unix" {
+		return fmt.Sprintf("/%s%s", host.Host, host.Path)
+	}
+	return host.Host
 }
 
 func (b *BridgeImpl) getListeners(uri, hook_type string) []*client.Subscription {

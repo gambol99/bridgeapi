@@ -19,11 +19,29 @@ import (
 	"strings"
 )
 
-func (r *Subscription) Add(h *APIHook) {
+func (r *Subscription) AddHook(h *APIHook) {
 	if r.Requests == nil {
 		r.Requests = make([]*APIHook, 0)
 	}
 	r.Requests = append(r.Requests, h)
+}
+
+func (r *Subscription) PreHook(uri string) *Subscription {
+	hook := &APIHook{
+		HookType: PRE_EVENT,
+		URI: uri,
+	}
+	r.AddHook(hook)
+	return r
+}
+
+func (r *Subscription) PostHook(uri string) *Subscription {
+	hook := &APIHook{
+		HookType: POST_EVENT,
+		URI: uri,
+	}
+	r.AddHook(hook)
+	return r
 }
 
 func (r Subscription) Valid() error {
@@ -56,8 +74,8 @@ func (r *APIHook) Valid() error {
 	}
 	// convert to uppercase
 	r.HookType = strings.ToUpper(r.HookType)
-	if r.HookType != "PRE" || r.HookType != "POST" {
-		return fmt.Errorf("the hook type: %s is invalid, must be pre or post", r.HookType)
+	if r.HookType != "PRE" && r.HookType != "POST" {
+		return fmt.Errorf("the hook type: %s is invalid, must be PRE or POST", r.HookType)
 	}
 	return nil
 }

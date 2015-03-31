@@ -61,8 +61,8 @@ func (r *ClientImpl) decodeRequest(content string) (*APIRequest, error) {
 }
 
 func (r *ClientImpl) encodeRequest(request *APIRequest) ([]byte, error) {
-	buf := new(bytes.Buffer)
-	err := json.NewEncoder(buf).Encode(request)
+	var buf bytes.Buffer
+	err := json.NewEncoder(&buf).Encode(request)
 	if err != nil {
 		return []byte{}, err
 	}

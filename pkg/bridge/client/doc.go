@@ -29,7 +29,6 @@ const (
 
 	API_VERSION      = "/v1"
 	API_PING         = API_VERSION + "/ping"
-	API_SUBSCRIBE    = API_VERSION + "/subscribe"
 	API_SUBSCRIPTION = API_VERSION + "/subscriptions"
 )
 

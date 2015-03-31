@@ -36,7 +36,7 @@ func NewBridgeAPI(cfg *Config, bridge Bridge) (*BridgeAPI, error) {
 	// step: we construct the webservice
 	router := mux.NewRouter()
 	router.Handle(client.API_PING, middleware.ThenFunc(api.pingHandler)).Methods("GET")
-	router.Handle(client.API_SUBSCRIBE, middleware.ThenFunc(api.subscribeHandler)).Methods("POST")
+	router.Handle(client.API_SUBSCRIPTION, middleware.ThenFunc(api.subscribeHandler)).Methods("POST")
 	router.Handle(client.API_SUBSCRIPTION, middleware.ThenFunc(api.subscriptionsHandler)).Methods("GET")
 	router.Handle(client.API_SUBSCRIPTION+"/{id}", middleware.ThenFunc(api.unsubscribeHandler)).Methods("DELETE")
 	api.router = router
@@ -111,11 +111,7 @@ func (r *BridgeAPI) unsubscribeHandler(writer http.ResponseWriter, request *http
 		r.errorMessage(writer, request, "you have not specified the subscription id")
 		return
 	}
-
-	// check the subscription id exists
-
-	// send a request to remove from the bridge
-
+	r.bridge.Remove(id)
 }
 
 func (r *BridgeAPI) errorMessage(writer http.ResponseWriter, request *http.Request, message string, args ...interface{}) error {
@@ -130,6 +126,7 @@ func (r *BridgeAPI) send(writer http.ResponseWriter, request *http.Request, data
 	// encode to the appropriate content type
 	content, content_type, err := encodeByContent(request, data)
 	if err != nil {
+		log.Debugf("Failed to encode the request data, error: %s", err)
 		return err
 	}
 	writer.Header().Set("Content-Type", content_type)
