@@ -13,8 +13,8 @@ VERSION=$(shell awk '/const Version/ { print $$4 }' version.go | sed 's/"//g')
 
 build:
 	mkdir -p ./bin
-	(cd cmd/bridge && go build -o ../../bin/bridge)
-	(cd cmd/slow_client && go build -o ../../bin/slow_client)
+	(cd cmd/bridge && go get && go build -o ../../bin/bridge)
+	(cd cmd/slow_client && go get && go build -o ../../bin/slow_client)
 
 docker: build
 	docker build -t ${AUTHOR}/${NAME} .
@@ -23,5 +23,6 @@ clean:
 	rm -f bin/bridge
 
 test:
+	go get github.com/stretchr/testify
 	go test -v ./...
 
