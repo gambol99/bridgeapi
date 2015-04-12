@@ -24,6 +24,7 @@ import (
 	"github.com/gambol99/bridgeapi/pkg/bridge/client"
 
 	"github.com/stretchr/testify/assert"
+	log "github.com/Sirupsen/logrus"
 )
 
 const (
@@ -35,7 +36,9 @@ var (
 )
 
 func testAPIPath(uri string) string {
-	return fmt.Sprintf("http://%s/%s/%s", API_BINDING, client.API_VERSION, uri)
+	url := fmt.Sprintf("http://%s%s", API_BINDING, uri)
+	log.Debugf("Url: %s", url)
+	return url
 }
 
 func getJSON(url string, result interface{}, t *testing.T) {
@@ -56,13 +59,16 @@ func getJSON(url string, result interface{}, t *testing.T) {
 
 func TestNewAPI(t *testing.T) {
 	config := DefaultConfig()
+	log.SetLevel(log.DebugLevel)
+	log.SetFormatter(&log.TextFormatter{})
+	log.Infof("Creating a new Bridge API")
 	config.Bind = "127.0.0.1:3001"
 	bridge := createTestBridge(config)
 	assert.NotNil(t, bridge)
 }
 
 func TestAPIRegistrations(t *testing.T) {
-	response, err := http.Get(testAPIPath("subscriptions"))
+	response, err := http.Get(testAPIPath(client.API_SUBSCRIPTION))
 	assert.Nil(t, err)
 	assert.NotNil(t, response)
 	assert.Equal(t, 200, response.StatusCode)

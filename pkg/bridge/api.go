@@ -29,6 +29,7 @@ import (
 // Create a new API service
 //	bridge:		the reference to the bridge itself
 func NewAPI(bridge Bridge) (*API, error) {
+	log.Infof("Initializing a Bridge API, running on: %s", bridge.Config().Bind)
 	api := new(API)
 	chain := alice.New(api.recoveryHandler, api.loggingHandler, api.authenticationHandler)
 	router := mux.NewRouter()
@@ -36,18 +37,25 @@ func NewAPI(bridge Bridge) (*API, error) {
 	router.Handle(client.API_SUBSCRIPTION, chain.ThenFunc(api.subscriptionsHandler)).Methods("GET")
 	router.Handle(client.API_SUBSCRIPTION+"/{id}", chain.ThenFunc(api.unsubscribeHandler)).Methods("DELETE")
 	api.router = router
+	api.bridge = bridge
 	api.server = &http.Server{
 		Addr:    bridge.Config().Bind,
 		Handler: router,
 	}
-	go api.server.ListenAndServe()
+	go func() {
+		if err := api.server.ListenAndServe(); err != nil {
+			log.Fatalf("Failed to listen and bind the Bridge API, error: %s", err)
+		}
+	}()
 	return api, nil
 }
 
 func (r *API) recoveryHandler(next http.Handler) http.Handler {
+
 	fn := func(wr http.ResponseWriter, req *http.Request) {
 		defer func() {
 			if err := recover(); err != nil {
+				log.Errorf("[%s] %q error: %s", req.Method, req.URL.String(), err)
 				http.Error(wr, http.StatusText(500), 500)
 			}
 		}()
