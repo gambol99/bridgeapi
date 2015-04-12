@@ -1,0 +1,11 @@
+#
+#   Author: Rohith
+#   Date: 2015-04-12 15:26:51 +0100 (Sun, 12 Apr 2015)
+#
+#  vim:ts=2:sw=2:et
+#
+language: go
+go:
+  - 1.4
+install:
+  - make test
