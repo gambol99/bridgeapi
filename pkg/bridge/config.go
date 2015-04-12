@@ -14,28 +14,27 @@ limitations under the License.
 package bridge
 
 import (
-	"encoding/json"
 	"fmt"
 	"io/ioutil"
-	"strings"
 
-	"github.com/gambol99/bridge.io/pkg/bridge/client"
+	"github.com/gambol99/bridgeapi/pkg/bridge/client"
+	"github.com/gambol99/bridgeapi/pkg/bridge/utils"
 
 	"github.com/golang/glog"
 )
 
 func (r Config) String() string {
 	return fmt.Sprintf(`
-  Server API: %s
-  Pipes: %s
-  Verbosity: %d
-`, r.ApiBinding, r.Pipes, r.Verbosity)
+ Server API: %s
+ Pipes: %s
+ Verbosity: %d
+`, r.Bind, r.Pipes, r.Verbosity)
 }
 
 // Returns a default configuration
 func DefaultConfig() *Config {
 	config := new(Config)
-	config.ApiBinding = DEFAULT_API_BINDING
+	config.Bind = DEFAULT_API_BINDING
 	config.Pipes = []string{}
 	config.Subscriptions = make([]*client.Subscription, 0)
 	return config
@@ -62,9 +61,8 @@ func loadFile(filename string) (string, error) {
 
 func decodeConfig(content string) (*Config, error) {
 	config := new(Config)
-	err := json.NewDecoder(strings.NewReader(string(content))).Decode(config)
-	if err != nil {
+	if err := utils.JsonDecode([]byte(content), config); err != nil {
 		return nil, err
 	}
-	return config, err
+	return config, nil
 }

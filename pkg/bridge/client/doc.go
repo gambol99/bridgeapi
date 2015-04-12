@@ -14,9 +14,7 @@ limitations under the License.
 package client
 
 import (
-	"errors"
 	"fmt"
-	"io"
 	"time"
 )
 
@@ -33,30 +31,28 @@ const (
 	API_SUBSCRIPTION = API_VERSION + "/subscriptions"
 )
 
-var (
-	ErrInvalidBridge = errors.New("Invalid bridge endpoint")
-)
-
 // the configuration of the client
 type Config struct {
 	// the rest endpoint for the bridge io server - e.g http://127.0.0.1:8989
 	Bridge string `json:"bridge"`
 	// the binding for the client i.e. where the endpoint will run
 	Binding string `json:"bind"`
-	// the output stream for logging
-	Logger io.Writer
+	// the token used to connect to bridge
+	Token string `json:"token"`
 	// the max time to wait for a request to fulfil
 	MaxTime time.Duration
 }
 
 // The client interface
 type Client interface {
-	// Close the resource and unregister if required
+	// close the resource and unregister if required
 	Close() error
-	// Register a hook in the API
+	// register a hook in the API
 	Subscribe(*Subscription, RequestsChannel) (string, error)
-	// Unsubscribe from the provider
+	// unsubscribe from the provider
 	Unsubscribe(string) error
+	// list the current subscriptions
+	Subscriptions() ([]*Subscription, error)
 }
 
 // a channel for the below
@@ -92,7 +88,6 @@ func (r *Event) Respond() {
 // A registration request structure: used buy the client register for hook events
 // into the API
 type Subscription struct {
-	SubscriptionID string
 	// an application ID
 	ID string `json:"id"`
 	// the endpoint to send these requests
@@ -107,7 +102,7 @@ type Hook struct {
 	Enforcing bool `json:"enforcing"`
 	// when the hook should be fired, i.e. pre, post or both
 	HookType string `json:"type"`
-	// the entrypoint for the request, a regex applied to URI
+	// the entry point for the request, a regex applied to URI
 	URI string `json:"uri"`
 }
 

@@ -21,7 +21,7 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/gambol99/bridge.io/pkg/bridge"
+	"github.com/gambol99/bridgeapi/pkg/bridge"
 
 	log "github.com/Sirupsen/logrus"
 	"github.com/alecthomas/kingpin"
@@ -128,7 +128,7 @@ func parseConfiguration() (*bridge.Config, error) {
 		}
 	}
 	if *cmd_bind != "" {
-		config.ApiBinding = *cmd_bind
+		config.Bind = *cmd_bind
 	}
 	for _, pipe := range *cmd_pipes {
 		config.Pipes = append(config.Pipes, pipe)
@@ -138,7 +138,7 @@ func parseConfiguration() (*bridge.Config, error) {
 
 // validates we have everything we need in the configuration
 func validateConfiguration(config *bridge.Config) (*bridge.Config, error) {
-	if config.ApiBinding == "" {
+	if config.Bind == "" {
 		return nil, fmt.Errorf("You have not specified a binding for the api service")
 	}
 	// step: lets check we have something to run - at the very least we need a pipe

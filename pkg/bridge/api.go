@@ -18,42 +18,33 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/gambol99/bridge.io/pkg/bridge/client"
-	"github.com/gambol99/bridge.io/pkg/bridge/utils"
+	"github.com/gambol99/bridgeapi/pkg/bridge/client"
+	"github.com/gambol99/bridgeapi/pkg/bridge/utils"
 
 	log "github.com/Sirupsen/logrus"
 	"github.com/gorilla/mux"
 	"github.com/justinas/alice"
 )
 
-// the implementation for the rest api
-func NewBridgeAPI(cfg *Config, bridge Bridge) (*BridgeAPI, error) {
-	api := new(BridgeAPI)
-	api.bridge = bridge
-
-	// step: create the middle handlers
-	middleware := alice.New(api.recoveryHandler, api.loggingHandler)
-
-	// step: we construct the webservice
+// Create a new API service
+//	bridge:		the reference to the bridge itself
+func NewAPI(bridge Bridge) (*API, error) {
+	api := new(API)
+	chain := alice.New(api.recoveryHandler, api.loggingHandler, api.authenticationHandler)
 	router := mux.NewRouter()
-	router.Handle(client.API_PING, middleware.ThenFunc(api.pingHandler)).Methods("GET")
-	router.Handle(client.API_SUBSCRIPTION, middleware.ThenFunc(api.subscribeHandler)).Methods("POST")
-	router.Handle(client.API_SUBSCRIPTION, middleware.ThenFunc(api.subscriptionsHandler)).Methods("GET")
-	router.Handle(client.API_SUBSCRIPTION+"/{id}", middleware.ThenFunc(api.unsubscribeHandler)).Methods("DELETE")
+	router.Handle(client.API_SUBSCRIPTION, chain.ThenFunc(api.subscribeHandler)).Methods("POST")
+	router.Handle(client.API_SUBSCRIPTION, chain.ThenFunc(api.subscriptionsHandler)).Methods("GET")
+	router.Handle(client.API_SUBSCRIPTION+"/{id}", chain.ThenFunc(api.unsubscribeHandler)).Methods("DELETE")
 	api.router = router
-
-	// step: we start listening
 	api.server = &http.Server{
-		Addr:    cfg.ApiBinding,
+		Addr:    bridge.Config().Bind,
 		Handler: router,
 	}
-
-	// step: start listening to the requests
 	go api.server.ListenAndServe()
 	return api, nil
 }
 
-func (r *BridgeAPI) recoveryHandler(next http.Handler) http.Handler {
+func (r *API) recoveryHandler(next http.Handler) http.Handler {
 	fn := func(wr http.ResponseWriter, req *http.Request) {
 		defer func() {
 			if err := recover(); err != nil {
@@ -65,7 +56,7 @@ func (r *BridgeAPI) recoveryHandler(next http.Handler) http.Handler {
 	return http.HandlerFunc(fn)
 }
 
-func (r *BridgeAPI) loggingHandler(next http.Handler) http.Handler {
+func (r *API) loggingHandler(next http.Handler) http.Handler {
 	fn := func(wr http.ResponseWriter, req *http.Request) {
 		start_time := time.Now()
 		next.ServeHTTP(wr, req)
@@ -76,62 +67,65 @@ func (r *BridgeAPI) loggingHandler(next http.Handler) http.Handler {
 	return http.HandlerFunc(fn)
 }
 
-func (r *BridgeAPI) pingHandler(writer http.ResponseWriter, request *http.Request) {
-	msg := new(client.MessageResponse)
-	msg.Message = "pong"
-	r.send(writer, msg)
+// Not exactly the most sophisticated security, but it will do for now
+func (r *API) authenticationHandler(next http.Handler) http.Handler {
+	fn := func(w http.ResponseWriter, request *http.Request) {
+		if r.bridge.Config().Token != "" {
+			secretToken := request.Header.Get("X-Auth-ApiBridge")
+			if secretToken != r.bridge.Config().Token {
+				log.Infof("Remote client: %s failed authentication, invalid token", request.RemoteAddr)
+				w.WriteHeader(401)
+				return
+			}
+		}
+		next.ServeHTTP(w, request)
+	}
+	return http.HandlerFunc(fn)
 }
 
-func (r *BridgeAPI) subscribeHandler(writer http.ResponseWriter, request *http.Request) {
+func (r *API) subscribeHandler(writer http.ResponseWriter, request *http.Request) {
 	// step: we grab and decode
 	subscription := new(client.Subscription)
 	if err := utils.HttpJsonDecode(request.Body, request.ContentLength, subscription); err != nil {
-		r.errorMessage(writer, request, "unable to decode the request, error: %s", err)
-		return
+		r.error(writer, "unable to decode the request, error: %s", err)
 	}
-
-	// step: parse the request to the bridge
-	id, err := r.bridge.Add(subscription)
-	if err != nil {
-		r.errorMessage(writer, request, "unable to add subscription, error: %s", err)
-		return
+	// step: pass the request to the bridge
+	if subscriptionID, err := r.bridge.AddSubscription(subscription); err != nil {
+		r.error(writer, "unable to add subscription, error: %s", err)
+	} else {
+		r.send(writer, &client.SubscriptionResponse{ID: subscriptionID})
 	}
-	// step: compose the response
-	r.send(writer, &client.SubscriptionResponse{ID: id})
 }
 
-func (r *BridgeAPI) subscriptionsHandler(writer http.ResponseWriter, request *http.Request) {
+func (r *API) subscriptionsHandler(writer http.ResponseWriter, request *http.Request) {
 	response := new(client.SubscriptionsResponse)
-	//response.Subscriptions = r.bridge.Subscriptions()
+	response.Subscriptions = r.bridge.Subscriptions()
 	r.send(writer, response)
 }
 
-func (r *BridgeAPI) unsubscribeHandler(writer http.ResponseWriter, request *http.Request) {
-	id := mux.Vars(request)["id"]
-	if id == "" {
-		r.errorMessage(writer, request, "you have not specified the subscription id")
-		return
+func (r *API) unsubscribeHandler(writer http.ResponseWriter, request *http.Request) {
+	subscriptionID := mux.Vars(request)["id"]
+	if subscriptionID == "" {
+		r.error(writer, "you have not specified the subscription id")
+	} else {
+		r.bridge.DeleteSubscription(subscriptionID)
 	}
-	r.bridge.Remove(id)
 }
 
-func (r *BridgeAPI) errorMessage(writer http.ResponseWriter, request *http.Request, message string, args ...interface{}) error {
+func (r *API) error(writer http.ResponseWriter, message string, args ...interface{}) error {
 	msg := &client.MessageResponse{
 		Message: fmt.Sprintf(message, args...),
 	}
 	return r.send(writer, msg)
 }
 
-// Send a response back the client
-func (r *BridgeAPI) send(writer http.ResponseWriter, data interface{}) error {
-	//method, location string, payload, result interface{}, timeout time.Duration)
-	content, err := utils.JsonEncode(data)
-	if err != nil {
-		log.Debugf("Failed to encode the request data, error: %s", err)
+func (r *API) send(writer http.ResponseWriter, data interface{}) error {
+	if content, err := utils.JsonEncode(data); err != nil {
 		return err
+	} else {
+		writer.Header().Set("Content-Type", "application/json")
+		writer.WriteHeader(200)
+		writer.Write(content)
+		return nil
 	}
-	writer.Header().Set("Content-Type", "application/json")
-	writer.WriteHeader(200)
-	writer.Write(content)
-	return nil
 }

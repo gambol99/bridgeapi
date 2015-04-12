@@ -18,14 +18,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"net"
 	"net/http"
-	"net/http/httputil"
 	"net/url"
-	"os"
-	"strings"
 	"time"
+
+	"github.com/gambol99/bridgeapi/pkg/bridge/utils"
 
 	log "github.com/Sirupsen/logrus"
 	"github.com/gorilla/mux"
@@ -58,7 +56,7 @@ func DefaultConfig() *Config {
 	return &Config{
 		Bridge:  DEFAULT_BRIDGE_ENDPOINT,
 		Binding: DEFAULT_BINDING,
-		Logger:  os.Stdout,
+		Token: "",
 		MaxTime: (time.Duration(300) * time.Second),
 	}
 }
@@ -94,29 +92,39 @@ func (r *ClientImpl) Close() error {
 	return nil
 }
 
+// Retrieve a list of subscriptions from the bridge
+func (r *ClientImpl) Subscriptions() ([]*Subscription, error) {
+	list := new(SubscriptionsResponse)
+	_, err := r.send("GET", API_SUBSCRIPTION, nil, list)
+	if err != nil {
+		log.Debugf("Failed to retrieve a list of subscriptions, error: %s", err)
+		return nil, err
+	}
+	return list.Subscriptions, nil
+}
+
 // Perform a registration request to the bridge
 // 	register:		the registration structure containing the hooks
 //  channel:		the channel you want to receive the api requests on
-func (r *ClientImpl) Subscribe(register *Subscription, channel RequestsChannel) (string, error) {
+func (r *ClientImpl) Subscribe(subscription *Subscription, channel RequestsChannel) (string, error) {
 	// step: validate the subscription
-	if err := register.Valid(); err != nil {
+	if err := subscription.Valid(); err != nil {
+		log.Debugf("The subscription: %s is not valid, error: %s", subscription, err)
 		return "", err
 	}
 
 	// step: register the subscription
 	r.requests = channel
 	response := new(SubscriptionResponse)
-	code, err := r.send("POST", API_SUBSCRIPTION, register, response)
+	code, err := r.send("POST", API_SUBSCRIPTION, subscription, response)
 	if err != nil {
 		return "", err
 	}
 	if code != 200 {
 		return "", fmt.Errorf("status: %d", code)
 	}
-
 	// step: we add to the list
 	r.subscriptions = append(r.subscriptions, response.ID)
-
 	return response.ID, nil
 }
 
@@ -139,21 +147,19 @@ func (r *ClientImpl) Unsubscribe(id string) error {
 func (r *ClientImpl) setupHttpService(client *ClientImpl) error {
 	var err error
 	// step: parse the binding
-	client.server_url, err = url.Parse(client.config.Binding)
-	if err != nil {
+	if client.server_url, err = url.Parse(client.config.Binding); err != nil {
 		return errors.New(fmt.Sprintf("invalid http binding, error: %s", err))
 	}
 	log.Debugf("Parsing the client binding address: %s:%s", client.server_url.Scheme, client.server_url.Host)
 
 	// step: create a listener for the interface
-	client.listener, err = net.Listen(client.server_url.Scheme, client.server_url.Host)
-	if err != nil {
+	if client.listener, err = net.Listen(client.server_url.Scheme, client.server_url.Host); err != nil {
 		return errors.New(fmt.Sprintf("unable to create the listener, error: %s", err))
 	}
 
 	// step: setup the routing
 	log.Debugf("Creating the router for the client listener service")
-	middleware := alice.New(client.recoveryHandler).ThenFunc(client.requestHandler)
+	middleware := alice.New(client.recoveryHandler, client.loggingHandler).ThenFunc(client.requestHandler)
 	router := mux.NewRouter()
 	router.Handle("/", middleware)
 	client.router = router
@@ -166,12 +172,11 @@ func (r *ClientImpl) setupHttpService(client *ClientImpl) error {
 		MaxHeaderBytes: 1 << 20,
 	}
 
-	// step: start listening
 	go client.server.Serve(client.listener)
 	return nil
 }
 
-func (pipe *ClientImpl) recoveryHandler(next http.Handler) http.Handler {
+func (r *ClientImpl) recoveryHandler(next http.Handler) http.Handler {
 	fn := func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
 			if err := recover(); err != nil {
@@ -183,30 +188,37 @@ func (pipe *ClientImpl) recoveryHandler(next http.Handler) http.Handler {
 	return http.HandlerFunc(fn)
 }
 
-func (r *ClientImpl) requestHandler(writer http.ResponseWriter, request *http.Request) {
-	log.Debugf("Recieved request from: %s", request.RemoteAddr)
+func (r *ClientImpl) loggingHandler(next http.Handler) http.Handler {
+	fn := func(w http.ResponseWriter, request *http.Request) {
+		log.Debugf("Recieved request from: %s", request.RemoteAddr)
+		next.ServeHTTP(w, request)
+	}
+	return http.HandlerFunc(fn)
+}
 
+func (r *ClientImpl) requestHandler(writer http.ResponseWriter, request *http.Request) {
+
+	event := new(Event)
 	// step: we parse and decode the request and send on the channel
-	apirq, err := r.decodeAPIRequest(request)
-	if err != nil {
+	if err := utils.HttpJsonDecode(request.Body, request.ContentLength, event); err != nil {
 		log.Debugf("Failed to decode the request from: %s, error: %s", request.RemoteAddr, err)
 		return
 	}
 
-	log.Debugf("Request from: %s, content: %s", request.RemoteAddr, apirq)
+	log.Debugf("Request from: %s, content: %s", request.RemoteAddr, event)
 
 	// step: we create a channel for sending the response back to the client and pass
 	// the reference in the api request struct. To ensure we don't end up with a plethora of
 	// these, we have a fail-safe timer
-	apirq.response = make(RequestsChannel)
+	event.response = make(RequestsChannel)
 
 	go func() {
-		r.requests <- apirq
+		r.requests <- event
 	}()
 
 	// step: wait for a response from the consumer and reply back to the client
 	select {
-	case response := <-apirq.response:
+	case response := <-event.response:
 		log.Debugf("Recieved the response from client, sending back the response")
 
 		// step: we encode the api request
@@ -228,64 +240,12 @@ func (r *ClientImpl) requestHandler(writer http.ResponseWriter, request *http.Re
 // Send a json request to the bridge, get and decode the response
 //	uri:		the uri on the bridge to target
 //  result:		the data structure we should decode into
-func (r *ClientImpl) send(method, uri string, data, result interface{}) (int, error) {
-	log.Debugf("Sending the request to bridge: %V", data)
-
-	// step: encode the post data
-	var buffer bytes.Buffer
-	if data != nil {
-		if err := json.NewEncoder(&buffer).Encode(data); err != nil {
-			return 0, fmt.Errorf("Failed to encode the data for request, error: %s", err)
-		}
-	}
-
-	// step: we compose the request
-	request, err := http.NewRequest(method, uri, &buffer)
+func (r *ClientImpl) send(method, uri string, post_data, result interface{}) (int, error) {
+	full_url := fmt.Sprintf("%s://%s/%s", r.bridge.Scheme, utils.Dial(r.bridge), uri)
+	status_code, err := utils.HttpJsonSend(method, full_url, post_data, result, 30)
 	if err != nil {
-		return 0, fmt.Errorf("unable to compose the request to the bridge, error: %s", err)
+		log.Errorf("unable to process request to bridge: %s, error: %s", full_url, err)
 	}
-
-	// step: we compose the dialing to the bridge endpoint
-	dial, err := net.Dial(r.bridge.Scheme, r.dialHost())
-	if err != nil {
-		log.Debugf("unable to dial the bridge, error: %s", err)
-		return 0, err
-	}
-
-	// step: we create a connection
-	http_client := httputil.NewClientConn(dial, nil)
-	defer http_client.Close()
-
-	// perform the request to api (sink)
-	response, err := http_client.Do(request)
-	if err != nil {
-		log.Debugf("unable to post the request to bridge endpoint, error: %s", err)
-		return 0, fmt.Errorf("Failed to perform bridge request: %s, error: %s", uri, err)
-	}
-
-	// step: read in the response
-	if response.ContentLength > 0 || response.ContentLength < 0 {
-		if response.Header.Get("Content-Type") == "application/json" {
-
-			content, err := ioutil.ReadAll(response.Body)
-			if err != nil {
-				return response.StatusCode, fmt.Errorf("Failed to read in the response body, error: %s", err)
-			}
-
-			// step: decode the response
-			err = json.NewDecoder(strings.NewReader(string(content))).Decode(result)
-			if err != nil {
-				log.Debugf("Failed to decode json response: %s", string(content))
-				return response.StatusCode, fmt.Errorf("Failed to decode the response, error: %s", err)
-			}
-		}
-	}
-	return response.StatusCode, nil
-}
-
-func (r *ClientImpl) dialHost() string {
-	if r.bridge.Scheme == "unix" {
-		return fmt.Sprintf("/%s%s", r.bridge.Host, r.bridge.Path)
-	}
-	return r.bridge.Host
+	log.Debugf("Recieved response from request, code: %s, payload: %V", status_code, result)
+	return status_code, nil
 }

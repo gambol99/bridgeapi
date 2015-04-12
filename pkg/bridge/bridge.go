@@ -14,28 +14,26 @@ limitations under the License.
 package bridge
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"io/ioutil"
-	"math/rand"
 	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
-	"regexp"
+	"strings"
 	"sync"
 	"time"
 
-	"github.com/gambol99/bridge.io/pkg/bridge/client"
+	"github.com/gambol99/bridgeapi/pkg/bridge/client"
+	"github.com/gambol99/bridgeapi/pkg/bridge/utils"
 
 	log "github.com/Sirupsen/logrus"
-
-	"bytes"
-	"encoding/json"
-	"strings"
 )
 
 const (
-	SUBSCRIPTION_ID_LENGTH = 32
+	SUBSCRIPTION_MIN_ID = 32
 )
 
 // the bridge implementation
@@ -43,30 +41,26 @@ type BridgeImpl struct {
 	sync.RWMutex
 	// the configuration
 	config *Config
-	// the subscriptions
-	subscriptions []*client.Subscription
 	// the bridge api server
-	api *BridgeAPI
-	// the client used to connecting to the subscribers
-	client *http.Client
+	api *API
+	// an array of subscriptions
+	subscribers []*client.Subscription
+	// a map of id to subscriptions
+	subscribersMap map[string]*client.Subscription
 }
 
 // Create a new Bridge from the configuration
 //	cfg:		the bridge configuration reference
 func NewBridge(cfg *Config) (Bridge, error) {
-	var err error
-	bridge := &BridgeImpl{
-		config:        cfg,
-		subscriptions: make([]*client.Subscription, 0),
-	}
-	bridge.client = &http.Client{}
-
-	// step: create an bridge api
-	if bridge.api, err = NewBridgeAPI(cfg, bridge); err != nil {
-		log.Errorf("Failed to create the Bridge API, error: %s", err)
+	bridge := new(BridgeImpl)
+	bridge.config = cfg
+	bridge.subscribers = make([]*client.Subscription, 0)
+	bridge.subscribersMap = make(map[string]*client.Subscription, 0)
+	if api, err := NewAPI(bridge); err != nil {
 		return nil, err
+	} else {
+		bridge.api = api
 	}
-
 	return bridge, nil
 }
 
@@ -76,86 +70,103 @@ func (b *BridgeImpl) Close() error {
 	return nil
 }
 
-func (b *BridgeImpl) Add(subscription *client.Subscription) (string, error) {
+// Return a pointer to the configuration
+func (b *BridgeImpl) Config() *Config {
+	return b.config
+}
+
+// Add a new subscription to the bridge
+// 	subscription:		a pointer to the Subscription
+func (b *BridgeImpl) AddSubscription(subscription *client.Subscription) (string, error) {
+	b.Lock()
+	defer b.Unlock()
 	log.Infof("Attempting to add the subscription: %s", subscription)
-	// step: validate the hook
+
+	// step: we validate the subscription
 	if err := subscription.Valid(); err != nil {
 		log.Errorf("Invalid subscription request: %V, error: %s", err)
 		return "", err
 	}
-	b.Lock()
-	defer b.Unlock()
-	subscription.SubscriptionID = b.generateSubscriptionID()
-	b.subscriptions = append(b.subscriptions, subscription)
-	return subscription.SubscriptionID, nil
+
+	// step: we check if a subscription already exists
+	if _, found := b.subscribersMap[subscription.ID]; found {
+		return "", fmt.Errorf("a subscription already exists with this ID: %s", subscription.ID)
+	}
+
+	// step: we add to the list of subscribers
+	subscriptionID := utils.RandomUUID(SUBSCRIPTION_MIN_ID)
+	b.subscribersMap[subscriptionID] = subscription
+	b.subscribers = append(b.subscribers, subscription)
+	log.Infof("Added subscription: %s, id: %s", subscription, subscriptionID)
+	return subscriptionID, nil
 }
 
 // Remove the subscription from the bridge
 // 	id:			the subscription id which was given on subscribe()
-func (b *BridgeImpl) Remove(id string) error {
-	log.Infof("Attempting to remove the subscription id: %s", id)
-	if id == "" || len(id) < SUBSCRIPTION_ID_LENGTH {
-		return fmt.Errorf("Invalid subscription id, please check")
+func (b *BridgeImpl) DeleteSubscription(ID string) error {
+	log.Infof("Attempting to remove the subscription id: %s", ID)
+	// step: valid the token
+	if ID == "" || len(ID) < SUBSCRIPTION_MIN_ID {
+		return fmt.Errorf("invalid subscription id")
 	}
-
 	b.Lock()
 	defer b.Unlock()
-	sub_index := -1
-	for index, subscription := range b.subscriptions {
-		if subscription.SubscriptionID == id {
-			sub_index = index
-			break
+	// step: check the token exists
+	if _, found := b.subscribersMap[ID]; !found {
+		return fmt.Errorf("the subscription id: %s does not exist", ID)
+	}
+	log.Infof("Removing subscription: %s from the bridge", ID)
+	// step: remove from the map
+	delete(b.subscribersMap, ID)
+	for index, subscription := range b.subscribers {
+		if subscription.ID == ID {
+			b.subscribers = append(b.subscribers[:index], b.subscribers[index+1])
+			return nil
 		}
 	}
-
-	if sub_index < 0 {
-		return fmt.Errorf("The subscription id: %s does not exists", id)
-	}
-
-	b.subscriptions = append(b.subscriptions[:sub_index], b.subscriptions[sub_index+1])
-	return nil
+	return fmt.Errorf("internal error, we shouldn't have reached here")
 }
 
-// Called on a prehook event, i.e. when a client *first* makes a request to the API, but *before*
-// its been forwarded to the sink
-//  uri:		the uri of the resource
-//  query:      the query string if any
-//	request:	the content of the request
-func (b *BridgeImpl) PreHookEvent(uri string, request []byte) ([]byte, error) {
-	log.Infof("Bridge recieved a pre hook request, uri: %s", uri)
+func (b *BridgeImpl) HookEvent(uri, event_type string, request []byte) error {
+	log.Debugf("Recieved a hook event, uri: %s, type: %s, request: %s", uri, event_type, string(request))
 
-	// step: we get a list of subscribers that are hooked into this request
-	subscribers := b.getListeners(uri, client.PRE_EVENT)
-	log.Infof("Found %d subscribers listening out for: %s", len(subscribers), uri)
-	if len(subscribers) <= 0 {
-		return request, nil
+	// step: we need to check if anyone is hook to this uri?
+	subscribers, err := b.filterSubscribers(uri, event_type)
+	if err != nil {
+		log.Errorf("Failed to retrieve a list of subscribers, error: %s", err)
+		return err
+	}
+	log.Debugf("Found %d subscribers to the uri: %s, processing now", len(subscribers))
+
+	// step: anyone to pass to?
+	if subscribers == nil || len(subscribers) <= 0 {
+		return nil
 	}
 
 	// step: we call each of the subscribers in turn
 	payload := &client.Event{
 		ID:       "bridge",
 		Stamp:    time.Now(),
-		HookType: client.PRE_EVENT,
+		HookType: event_type,
 		URI:      uri,
 		Query:    "",
 		Request:  string(request),
 	}
 
 	// step: we iterate the subscribers and forward on the request
-	for _, l := range subscribers {
-		log.Debugf("Forwarding the request uri: %s to subscriber: %s", uri, l.Subscriber)
+	for _, sub := range subscribers {
+		log.Debugf("Forwarding the request uri: %s to subscriber: %s", uri, sub.Subscriber)
 
 		// step: forward the request on to the subscriber
-		response, err := b.performHTTP("POST", l.Subscriber, request)
+		response, err := b.performHTTP("POST", sub.Subscriber, request)
 		if err != nil {
-			log.Errorf("Failed to call the subscriber: %s, error: %s", l.Subscriber, err)
+			log.Errorf("Failed to call the subscriber: %s, error: %s", sub.Subscriber, err)
 			continue
 		}
 
 		// step: decode the result
-		err = json.NewDecoder(strings.NewReader(string(response))).Decode(payload)
-		if err != nil {
-			log.Errorf("Failed to decode the response from subscriber: %s, error: %s", l.Subscriber, err)
+		if err = json.NewDecoder(strings.NewReader(string(response))).Decode(payload); err != nil {
+			log.Errorf("Failed to decode the response from subscriber: %s, error: %s", sub.Subscriber, err)
 			continue
 		}
 
@@ -163,28 +174,21 @@ func (b *BridgeImpl) PreHookEvent(uri string, request []byte) ([]byte, error) {
 
 		request = []byte(payload.Request)
 	}
-	return request, nil
+	return nil
 }
 
-// Called on a posthook event, i.e. the response from the sink
-//  uri:		the uri of the resource
-//	request:	the content of the request
-func (b *BridgeImpl) PostHookEvent(uri string, request []byte) ([]byte, error) {
-	log.Infof("Bridge recieved a post hook request, uri: %s", uri)
-	forwarders := b.getListeners(uri, client.POST_EVENT)
-	if len(forwarders) <= 0 {
-		log.Infof("Found %d subscribers listening out for: %s", len(forwarders), uri)
-		return request, nil
-	}
+func (b *BridgeImpl) filterSubscribers(uri, event string) ([]*client.Subscription, error) {
 
-	return request, nil
+
+
+	return nil, nil
 }
 
 // Retrieve the current subscriptions which are in the bridge
 func (b *BridgeImpl) Subscriptions() []*client.Subscription {
 	b.RLock()
 	defer b.RUnlock()
-	return b.subscriptions
+	return b.subscribers
 }
 
 func (b *BridgeImpl) performHTTP(method, endpoint string, data []byte) ([]byte, error) {
@@ -204,8 +208,8 @@ func (b *BridgeImpl) performHTTP(method, endpoint string, data []byte) ([]byte, 
 	request.Header.Set("Content-Type", "application/json")
 
 	// step: create the dialing client
-	log.Debugf("Dialing the subscriber: %s:%s", u.Scheme, b.dialHost(u))
-	dial, err := net.Dial(u.Scheme, b.dialHost(u))
+	log.Debugf("Dialing the subscriber: %s:%s", u.Scheme, utils.Dial(u))
+	dial, err := net.Dial(u.Scheme, utils.Dial(u))
 	if err != nil {
 		log.Debugf("Failed to dial the bridge, error: %s", err)
 		return []byte{}, err
@@ -229,39 +233,4 @@ func (b *BridgeImpl) performHTTP(method, endpoint string, data []byte) ([]byte, 
 	}
 
 	return content, nil
-}
-
-func (r *BridgeImpl) dialHost(host *url.URL) string {
-	if host.Scheme == "unix" {
-		return fmt.Sprintf("/%s%s", host.Host, host.Path)
-	}
-	return host.Host
-}
-
-func (b *BridgeImpl) getListeners(uri, hook_type string) []*client.Subscription {
-	b.RLock()
-	defer b.RUnlock()
-	forwarders := make([]*client.Subscription, 0)
-	// step: we build a list of subscribers for this uri
-	for _, subscription := range b.subscriptions {
-		for _, hook := range subscription.Requests {
-			if hook.HookType == hook_type {
-				if matched, err := regexp.MatchString(hook.URI, uri); err != nil {
-					log.Errorf("The regex for the hook: %s is invalid, error: %s", err)
-				} else if matched {
-					forwarders = append(forwarders, subscription)
-				}
-			}
-		}
-	}
-	return forwarders
-}
-
-func (b *BridgeImpl) generateSubscriptionID() string {
-	numbers := []rune("0123456789")
-	id := make([]rune, SUBSCRIPTION_ID_LENGTH)
-	for i := range id {
-		id[i] = numbers[rand.Intn(len(numbers))]
-	}
-	return string(id)
 }

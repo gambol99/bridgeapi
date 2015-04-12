@@ -21,7 +21,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gambol99/bridge.io/pkg/bridge/client"
+	"github.com/gambol99/bridgeapi/pkg/bridge/client"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -31,11 +31,11 @@ const (
 )
 
 var (
-	api *BridgeAPI
+	api *API
 )
 
 func testAPIPath(uri string) string {
-	return fmt.Sprintf("http://%s/%s/%s", API_BINDING, API_VERSION, uri)
+	return fmt.Sprintf("http://%s/%s/%s", API_BINDING, client.API_VERSION, uri)
 }
 
 func getJSON(url string, result interface{}, t *testing.T) {
@@ -56,17 +56,9 @@ func getJSON(url string, result interface{}, t *testing.T) {
 
 func TestNewAPI(t *testing.T) {
 	config := DefaultConfig()
-	config.ApiBinding = "127.0.0.1:3001"
+	config.Bind = "127.0.0.1:3001"
 	bridge := createTestBridge(config)
 	assert.NotNil(t, bridge)
-}
-
-func TestAPIPing(t *testing.T) {
-	message := new(client.MessageResponse)
-	getJSON(testAPIPath("ping"), message, t)
-	assert.NotNil(t, message)
-	assert.NotEmpty(t, message.Message)
-	assert.Equal(t, "pong", message.Message)
 }
 
 func TestAPIRegistrations(t *testing.T) {
@@ -81,10 +73,10 @@ func TestAPIRegistrations(t *testing.T) {
 
 func TestAPISubscribe(t *testing.T) {
 	s := new(client.Subscription)
-	s.Endpoint = "127.0.0.1:8080"
+	s.Subscriber = "127.0.0.1:8080"
 	s.ID = "test"
-	s.Requests = make([]*client.APIHook, 0)
-	hk := new(client.APIHook)
+	s.Requests = make([]*client.Hook, 0)
+	hk := new(client.Hook)
 	hk.Enforcing = false
 	hk.HookType = "PRE"
 	hk.URI = "*/containers/start"

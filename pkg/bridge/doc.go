@@ -14,12 +14,11 @@ limitations under the License.
 package bridge
 
 import (
-	"errors"
 	"net"
 	"net/http"
 	"net/url"
 
-	"github.com/gambol99/bridge.io/pkg/bridge/client"
+	"github.com/gambol99/bridgeapi/pkg/bridge/client"
 
 	"github.com/gorilla/mux"
 )
@@ -32,26 +31,22 @@ const (
 	SESSION_HIJACKED      = "sess_hijacked"
 )
 
-var (
-	ErrInvalidEndpoint = errors.New("invalid endpoint specification, should be (tcp||unix)://[endpoint]")
-)
-
 //
 // The Bridge act as a hook the the API, as requests a passed through the chain,
 // the bridge is called to see if anyone is listening to the API hook, forwards it on,
 // hands back the mutated resource and allows it to continue;
 //
 type Bridge interface {
-	// a prehook event, i.e. before the request has been passed though to docker
-	PreHookEvent(string, []byte) ([]byte, error)
-	// a post event, i.e. the response from the sink api
-	PostHookEvent(string, []byte) ([]byte, error)
+	// retrieve the confir
+	Config() *Config
+	// a hook event
+	HookEvent(string, string, []byte) error
 	// hand back a list of subscriptions
 	Subscriptions() []*client.Subscription
 	// add a new subscription
-	Add(*client.Subscription) (string, error)
+	AddSubscription(*client.Subscription) (string, error)
 	// remove a subscription from the bridge
-	Remove(string) error
+	DeleteSubscription(string) error
 	// shutdown and release the resources
 	Close() error
 }
@@ -82,7 +77,10 @@ type PipeImpl struct {
 
 // the configuration for the bridge
 type Config struct {
-	ApiBinding string `json:"api"`
+	// the interface spec the admin api bind to
+	Bind string `json:"bind"`
+	// the token used to authenticate
+	Token string `json:"token"`
 	// a map of the registrations
 	Subscriptions []*client.Subscription `json:"subscriptions"`
 	// an array of source and sinks -H tcp://0.0.0.0:3000,unix://var/run/docker.sock
@@ -92,11 +90,21 @@ type Config struct {
 }
 
 // The REST API for processing dynamic hook registration
-type BridgeAPI struct {
+type API struct {
 	// the rest api router
 	router *mux.Router
 	// the http server
 	server *http.Server
 	// a reference to the bridge
 	bridge Bridge
+}
+
+type Subscribers struct {
+
+}
+
+type Subscriber struct {
+	Location string
+	//
+
 }

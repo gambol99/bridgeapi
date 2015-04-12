@@ -15,9 +15,8 @@ package main
 
 import (
 	"flag"
-	"os"
 
-	"github.com/gambol99/bridge.io/pkg/bridge/client"
+	"github.com/gambol99/bridgeapi/pkg/bridge/client"
 
 	log "github.com/Sirupsen/logrus"
 )
@@ -39,7 +38,6 @@ func main() {
 	config := client.DefaultConfig()
 	config.Binding = options.subscriber
 	config.Bridge = options.bridge
-	config.Logger = os.Stdout
 	log.SetLevel(log.DebugLevel)
 
 	c, err := client.NewClient(config)

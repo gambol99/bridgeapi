@@ -25,7 +25,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gambol99/bridge.io/pkg/bridge/utils"
+	"github.com/gambol99/bridgeapi/pkg/bridge/utils"
+	"github.com/gambol99/bridgeapi/pkg/bridge/client"
 
 	log "github.com/Sirupsen/logrus"
 	"github.com/gorilla/context"
@@ -128,12 +129,13 @@ func (pipe *PipeImpl) preSinkRequestHandler(next http.Handler) http.Handler {
 		}
 
 		// BRIDGE PRE HOOK CALL
-		if content, err = pipe.bridge.PreHookEvent(request.URL.RequestURI(), content); err != nil {
+		if err = pipe.bridge.HookEvent(request.URL.RequestURI(), client.PRE_EVENT, content); err != nil {
 			log.Errorf("Failed to call the bridge pre hook, error: %s", err)
 		}
 
 		// we inject the mutated response into the context
 		context.Set(request, SESSION_REQUEST, content)
+
 
 		// move on to the next level
 		next.ServeHTTP(w, request)
@@ -189,7 +191,7 @@ func (pipe *PipeImpl) postSinkRequestHandler(next http.Handler) http.Handler {
 			}
 
 			// BRIDGE POST HOOK CALL
-			if content, err = pipe.bridge.PostHookEvent(request.RequestURI, content); err != nil {
+			if err = pipe.bridge.HookEvent(request.RequestURI, client.POST_EVENT, content); err != nil {
 				log.Errorf("Failed to call the bridge post hook, error: %s", err)
 			}
 
@@ -288,9 +290,7 @@ func (pipe *PipeImpl) hijack(w http.ResponseWriter, request *http.Request) error
 }
 
 func (pipe *PipeImpl) parseForwardingURL(request *http.Request) string {
-	host := pipe.parseForwardingHost(request)
-	uri := pipe.parseForwardingURI(request)
-	return fmt.Sprintf("%s%s", host, uri)
+	return fmt.Sprintf("%s%s", utils.Dial(pipe.sink), pipe.parseForwardingURI(request))
 }
 
 func (pipe *PipeImpl) parseForwardingURI(request *http.Request) string {
@@ -299,15 +299,4 @@ func (pipe *PipeImpl) parseForwardingURI(request *http.Request) string {
 		uri = fmt.Sprintf("%s?%s", uri, request.URL.RawQuery)
 	}
 	return uri
-}
-
-func (pipe *PipeImpl) parseForwardingHost(request *http.Request) string {
-	host := ""
-	switch pipe.sink.Scheme {
-	case "tcp":
-		host = fmt.Sprintf("http://%s", pipe.sink.Host)
-	case "unix":
-		host = fmt.Sprintf("unix://%s%s", pipe.sink.Host, pipe.sink.Path)
-	}
-	return host
 }

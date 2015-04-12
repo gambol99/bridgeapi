@@ -22,7 +22,8 @@ import (
 const (
 	TEST_CONFIG = `
 	{
-		"api": "0.0.0.0:8989",
+		"bind": "0.0.0.0:8989",
+		"token": "32ir39028r94efudsfsdF",
 		"subscriptions": [
 			{
 	           "id": "ec2_rds",
@@ -49,7 +50,7 @@ func TestDecodeConfig(t *testing.T) {
 	config, err := decodeConfig(TEST_CONFIG)
 	assert.Nil(t, err)
 	assert.NotNil(t, config)
-	assert.Equal(t, "0.0.0.0:8989", config.ApiBinding)
+	assert.Equal(t, "0.0.0.0:8989", config.Bind)
 	assert.NotNil(t, config.Subscriptions)
 	assert.NotNil(t, config.Pipes)
 	assert.Equal(t, 2, len(config.Pipes), "we should have had 2 pipes")
