@@ -22,7 +22,7 @@ docker: build
 clean:
 	rm -f bin/bridge
 
-test:
+test: build
 	go get github.com/stretchr/testify
 	go test -v ./...
 
