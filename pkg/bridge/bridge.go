@@ -178,10 +178,8 @@ func (b *BridgeImpl) HookEvent(uri, event_type string, request []byte) error {
 }
 
 func (b *BridgeImpl) filterSubscribers(uri, event string) ([]*client.Subscription, error) {
-
-
-
-	return nil, nil
+	list := make([]*client.Subscription, 0)
+	return list, nil
 }
 
 // Retrieve the current subscriptions which are in the bridge

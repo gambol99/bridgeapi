@@ -40,10 +40,12 @@ func init() {
 }
 
 func Dial(location *url.URL) string {
-	if location.Scheme == "unix" {
-		return fmt.Sprintf("/%s%s", location.Host, location.Path)
+	switch location.Scheme {
+		case "unix":
+			return fmt.Sprintf("/%s%s", location.Host, location.Path)
+		default:
+			return fmt.Sprintf("http://%s", location.Host)
 	}
-	return location.Host
 }
 
 func IsJsonContent(r *http.Request) bool {

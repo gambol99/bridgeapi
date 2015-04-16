@@ -136,7 +136,6 @@ func (pipe *PipeImpl) preSinkRequestHandler(next http.Handler) http.Handler {
 		// we inject the mutated response into the context
 		context.Set(request, SESSION_REQUEST, content)
 
-
 		// move on to the next level
 		next.ServeHTTP(w, request)
 	}

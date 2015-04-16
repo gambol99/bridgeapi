@@ -42,8 +42,6 @@ type BridgeService struct {
 
 func main() {
 	log.SetLevel(log.DebugLevel)
-
-	log.Debugf("Parsing the configuration")
 	// lets get the configuration
 	config, err := parseConfiguration()
 	if err != nil {
